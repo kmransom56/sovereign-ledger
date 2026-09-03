@@ -68,6 +68,7 @@ def create_app(
     from app.routes.portal import router as portal_router
     from app.routes.tax_management import router as tax_router
     from app.routes.tax_reports import router as tax_reports_router
+    from app.routes.tax_lifecycle import router as tax_lifecycle_router
 
     app.include_router(auth_router)
     app.include_router(accounts_router)
@@ -80,6 +81,7 @@ def create_app(
     app.include_router(portal_router)
     app.include_router(tax_router)
     app.include_router(tax_reports_router)
+    app.include_router(tax_lifecycle_router)
 
     @app.get("/healthz", tags=["meta"])
     def healthz() -> dict[str, str]:
