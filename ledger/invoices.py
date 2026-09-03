@@ -20,7 +20,7 @@ from datetime import date
 from typing import Literal
 
 from ledger.engine import PostedEntry, post
-from ledger.types import JournalEntry, JournalLine, Money
+from ledger.types import AccountRef, JournalEntry, JournalLine, Money
 
 __all__ = [
     "Invoice",
@@ -206,8 +206,9 @@ def add_line_to_draft(
 
 def invoice_journal_entry(
     draft: InvoiceDraft,
-    ar_account_id: int,
-    fiscal_period_id: int,
+    ar_account_ref: AccountRef,
+    income_account_refs: dict[int, AccountRef],
+    entry_id: str,
 ) -> tuple[JournalEntry, int]:
     """Construct the balanced journal entry for an invoice.
 
@@ -220,8 +221,9 @@ def invoice_journal_entry(
 
     Args:
         draft: The invoice draft (must have lines).
-        ar_account_id: The AR account to debit.
-        fiscal_period_id: The fiscal period for this entry.
+        ar_account_ref: The AR account AccountRef to debit.
+        income_account_refs: Mapping of account_id → AccountRef for line items.
+        entry_id: Unique identifier for this entry.
 
     Returns:
         A tuple (JournalEntry, total_amount_cents):
@@ -229,7 +231,7 @@ def invoice_journal_entry(
           - total_amount_cents: The invoice total (for the invoice record).
 
     Raises:
-        DraftInvoiceError: If draft has no lines, or total is 0.
+        DraftInvoiceError: If draft has no lines, total is 0, or account references missing.
     """
     if not draft.lines:
         raise DraftInvoiceError("Invoice must have at least one line item.")
@@ -241,27 +243,24 @@ def invoice_journal_entry(
 
     # Debit AR account for total
     lines.append(
-        JournalLine.debit(
-            account=ar_account_id,
-            magnitude=draft.total_amount_cents,
-            memo=f"Invoice AR - {draft.memo or 'Invoice'}" if draft.memo else "Invoice AR",
-        )
+        JournalLine.debit(ar_account_ref, draft.total_amount_cents)
     )
 
     # Credit each line's income account
     for line in draft.lines:
-        lines.append(
-            JournalLine.credit(
-                account=line.account_id,
-                magnitude=line.amount_cents,
-                memo=line.description,
+        if line.account_id not in income_account_refs:
+            raise DraftInvoiceError(
+                f"Account reference not found for account {line.account_id}"
             )
+        account_ref = income_account_refs[line.account_id]
+        lines.append(
+            JournalLine.credit(account_ref, line.amount_cents)
         )
 
     entry = JournalEntry(
-        entry_date=draft.issue_date,
+        entry_id=entry_id,
+        date=draft.issue_date,
         description=f"Invoice - Customer {draft.customer_id}",
-        fiscal_period_id=fiscal_period_id,
         lines=tuple(lines),
     )
 

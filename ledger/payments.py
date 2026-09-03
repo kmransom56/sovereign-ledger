@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import NamedTuple
 
-from ledger.types import JournalEntry, JournalLine
+from ledger.types import AccountRef, JournalEntry, JournalLine
 
 __all__ = [
     "PaymentAllocation",
@@ -130,10 +130,10 @@ def allocate_payment(
 
 def payment_journal_entry(
     payment: Payment,
-    bank_account_id: int,
-    ar_account_id: int,
-    customer_credits_account_id: int | None,
-    fiscal_period_id: int,
+    bank_account_ref: AccountRef,
+    ar_account_ref: AccountRef,
+    customer_credits_account_ref: AccountRef | None,
+    entry_id: str,
 ) -> JournalEntry:
     """Construct the balanced journal entry for a payment.
 
@@ -149,58 +149,46 @@ def payment_journal_entry(
 
     Args:
         payment: The payment with allocations and overpayment calculated.
-        bank_account_id: The bank account to debit.
-        ar_account_id: The AR account to credit.
-        customer_credits_account_id: The customer_credits liability account (required if overpayment > 0).
-        fiscal_period_id: The fiscal period for this entry.
+        bank_account_ref: The bank account AccountRef to debit.
+        ar_account_ref: The AR account AccountRef to credit.
+        customer_credits_account_ref: The customer_credits liability AccountRef (required if overpayment > 0).
+        entry_id: Unique identifier for this entry.
 
     Returns:
         A balanced JournalEntry ready to post.
 
     Raises:
-        PaymentError: If overpayment > 0 but customer_credits_account_id is None.
+        PaymentError: If overpayment > 0 but customer_credits_account_ref is None.
     """
-    if payment.overpayment_cents > 0 and customer_credits_account_id is None:
+    if payment.overpayment_cents > 0 and customer_credits_account_ref is None:
         raise PaymentError(
-            "Overpayment detected but customer_credits_account_id not provided."
+            "Overpayment detected but customer_credits_account_ref not provided."
         )
 
     lines: list[JournalLine] = []
 
     # Debit bank account for full payment
     lines.append(
-        JournalLine.debit(
-            account=bank_account_id,
-            magnitude=payment.amount_cents,
-            memo=payment.memo or "Payment received",
-        )
+        JournalLine.debit(bank_account_ref, payment.amount_cents)
     )
 
     # Credit AR for the allocated amount (payment - overpayment)
     ar_credit = payment.amount_cents - payment.overpayment_cents
     if ar_credit > 0:
         lines.append(
-            JournalLine.credit(
-                account=ar_account_id,
-                magnitude=ar_credit,
-                memo=f"Payment applied to {len(payment.allocations)} invoice(s)",
-            )
+            JournalLine.credit(ar_account_ref, ar_credit)
         )
 
     # If overpayment, credit customer_credits liability
     if payment.overpayment_cents > 0:
         lines.append(
-            JournalLine.credit(
-                account=customer_credits_account_id,
-                magnitude=payment.overpayment_cents,
-                memo="Customer overpayment credit",
-            )
+            JournalLine.credit(customer_credits_account_ref, payment.overpayment_cents)
         )
 
     entry = JournalEntry(
-        entry_date=payment.payment_date,
+        entry_id=entry_id,
+        date=payment.payment_date,
         description=f"Payment from Customer {payment.customer_id}",
-        fiscal_period_id=fiscal_period_id,
         lines=tuple(lines),
     )
 

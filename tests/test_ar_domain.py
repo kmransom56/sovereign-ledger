@@ -52,7 +52,7 @@ from ledger.recurring import (
     new_template,
     should_generate_for_cycle,
 )
-from ledger.types import AccountRef
+from ledger.types import AccountRef, AccountType
 
 
 # ============================================================================
@@ -199,9 +199,16 @@ class TestInvoiceDomain:
             unit_price_cents=4900,  # $49.00
         )
 
-        ar_account_id = 1  # AR asset account
-        fiscal_period_id = 1
-        entry, total = invoice_journal_entry(draft, ar_account_id, fiscal_period_id)
+        # Create account references for testing
+        ar_account = AccountRef(code="1200", name="Accounts Receivable", type=AccountType.ASSET)
+        income_account = AccountRef(code="4000", name="Service Income", type=AccountType.INCOME)
+
+        entry, total = invoice_journal_entry(
+            draft,
+            ar_account_ref=ar_account,
+            income_account_refs={100: income_account},
+            entry_id="inv-20260901-001",
+        )
 
         # Check balanced (HR-1)
         assert len(entry.lines) == 2
@@ -222,7 +229,17 @@ class TestInvoiceDomain:
         draft = add_line_to_draft(draft, account_id=100, description="Service A", quantity=1, unit_price_cents=2000)
         draft = add_line_to_draft(draft, account_id=101, description="Service B", quantity=1, unit_price_cents=3000)
 
-        entry, total = invoice_journal_entry(draft, ar_account_id=1, fiscal_period_id=1)
+        # Create account references for testing
+        ar_account = AccountRef(code="1200", name="Accounts Receivable", type=AccountType.ASSET)
+        income_account_a = AccountRef(code="4001", name="Service A Income", type=AccountType.INCOME)
+        income_account_b = AccountRef(code="4002", name="Service B Income", type=AccountType.INCOME)
+
+        entry, total = invoice_journal_entry(
+            draft,
+            ar_account_ref=ar_account,
+            income_account_refs={100: income_account_a, 101: income_account_b},
+            entry_id="inv-20260901-002",
+        )
 
         # DR AR 5000, CR acc100 2000, CR acc101 3000 = balanced
         assert total == 5000
@@ -324,12 +341,17 @@ class TestPaymentDomain:
             overpayment_cents=0,
         )
 
+        # Create account references for testing
+        bank_account = AccountRef(code="1010", name="Checking", type=AccountType.ASSET)
+        ar_account = AccountRef(code="1200", name="Accounts Receivable", type=AccountType.ASSET)
+        customer_credits_account = AccountRef(code="2100", name="Customer Credits", type=AccountType.LIABILITY)
+
         entry = payment_journal_entry(
             payment,
-            bank_account_id=2,  # checking account
-            ar_account_id=1,  # AR asset
-            customer_credits_account_id=50,  # liability (not used here)
-            fiscal_period_id=1,
+            bank_account_ref=bank_account,
+            ar_account_ref=ar_account,
+            customer_credits_account_ref=customer_credits_account,
+            entry_id="pmt-20260915-001",
         )
 
         # Check balanced (HR-1)
@@ -351,12 +373,17 @@ class TestPaymentDomain:
             overpayment_cents=1100,  # $11 overpayment
         )
 
+        # Create account references for testing
+        bank_account = AccountRef(code="1010", name="Checking", type=AccountType.ASSET)
+        ar_account = AccountRef(code="1200", name="Accounts Receivable", type=AccountType.ASSET)
+        customer_credits_account = AccountRef(code="2100", name="Customer Credits", type=AccountType.LIABILITY)
+
         entry = payment_journal_entry(
             payment,
-            bank_account_id=2,
-            ar_account_id=1,
-            customer_credits_account_id=50,  # customer_credits liability
-            fiscal_period_id=1,
+            bank_account_ref=bank_account,
+            ar_account_ref=ar_account,
+            customer_credits_account_ref=customer_credits_account,
+            entry_id="pmt-20260915-002",
         )
 
         # Check balanced (HR-1): Dr Bank 6000 / Cr AR 4900 / Cr customer_credits 1100
@@ -367,7 +394,7 @@ class TestPaymentDomain:
         assert sum(l.amount_cents for l in entry.lines) == 0
 
     def test_payment_overpayment_requires_credits_account(self) -> None:
-        """Overpayment without customer_credits_account_id raises error."""
+        """Overpayment without customer_credits_account_ref raises error."""
         payment = Payment(
             id=None,
             customer_id=1,
@@ -379,13 +406,17 @@ class TestPaymentDomain:
             overpayment_cents=1100,
         )
 
+        # Create account references for testing
+        bank_account = AccountRef(code="1010", name="Checking", type=AccountType.ASSET)
+        ar_account = AccountRef(code="1200", name="Accounts Receivable", type=AccountType.ASSET)
+
         with pytest.raises(PaymentError):
             payment_journal_entry(
                 payment,
-                bank_account_id=2,
-                ar_account_id=1,
-                customer_credits_account_id=None,  # missing required account
-                fiscal_period_id=1,
+                bank_account_ref=bank_account,
+                ar_account_ref=ar_account,
+                customer_credits_account_ref=None,  # missing required account
+                entry_id="pmt-20260915-003",
             )
 
 
