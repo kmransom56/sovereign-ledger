@@ -56,7 +56,8 @@ def create_app(
 
     # Register routers (Step 4: auth; Step 5: accounts, entries, reports;
     # Step 7: bank upload, import review, reconciliation; Step 9: AR posting;
-    # Step 10: customer portal; Step 11: tax management & reporting).
+    # Step 10: customer portal; Step 11: tax management & reporting;
+    # Step 12: AP vendors, bills, payments).
     from app.routes.auth import router as auth_router
     from app.routes.accounts import router as accounts_router
     from app.routes.entries import router as entries_router
@@ -69,6 +70,7 @@ def create_app(
     from app.routes.tax_management import router as tax_router
     from app.routes.tax_reports import router as tax_reports_router
     from app.routes.tax_lifecycle import router as tax_lifecycle_router
+    from app.routes.ap import router as ap_router
 
     app.include_router(auth_router)
     app.include_router(accounts_router)
@@ -82,6 +84,7 @@ def create_app(
     app.include_router(tax_router)
     app.include_router(tax_reports_router)
     app.include_router(tax_lifecycle_router)
+    app.include_router(ap_router)
 
     @app.get("/healthz", tags=["meta"])
     def healthz() -> dict[str, str]:

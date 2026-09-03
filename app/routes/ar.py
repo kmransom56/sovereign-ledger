@@ -409,7 +409,7 @@ def get_invoice(
     request: Request,
     user: dict = Depends(current_user),
 ) -> dict:
-    """Get invoice detail with line items."""
+    """Get invoice detail with line items and tax breakdown."""
     conn: psycopg.Connection = request.app.state.db
     try:
         with conn.cursor() as cur:
@@ -432,6 +432,22 @@ def get_invoice(
                 (invoice_id,),
             )
             line_rows = cur.fetchall()
+
+            # Fetch tax details for each line
+            cur.execute(
+                """
+                SELECT ilt.invoice_line_id, tj.code, tj.name, tr.rate_percent,
+                       ilt.taxable_amount_cents, ilt.tax_amount_cents
+                FROM invoice_line_taxes ilt
+                JOIN tax_jurisdictions tj ON ilt.jurisdiction_id = tj.id
+                JOIN tax_rates tr ON ilt.tax_rate_id = tr.id
+                WHERE ilt.invoice_id = %s
+                ORDER BY ilt.invoice_line_id, tj.code
+                """,
+                (invoice_id,),
+            )
+            tax_rows = cur.fetchall()
+
     except HTTPException:
         raise
     except Exception as exc:
@@ -439,6 +455,41 @@ def get_invoice(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to load invoice: {exc}",
         )
+
+    # Group taxes by line ID
+    taxes_by_line = {}
+    total_tax_cents = 0
+    for tax_row in tax_rows:
+        line_id = tax_row[0]
+        if line_id not in taxes_by_line:
+            taxes_by_line[line_id] = []
+        taxes_by_line[line_id].append({
+            "jurisdiction": tax_row[1],
+            "jurisdiction_name": tax_row[2],
+            "rate_percent": float(tax_row[3]),
+            "taxable_amount_cents": tax_row[4],
+            "tax_amount_cents": tax_row[5],
+        })
+        total_tax_cents += tax_row[5]
+
+    # Build line items with tax details
+    lines = []
+    for lr in line_rows:
+        line_id = lr[0]
+        line_taxes = taxes_by_line.get(line_id, [])
+        line_tax_total = sum(t["tax_amount_cents"] for t in line_taxes)
+
+        lines.append({
+            "id": line_id,
+            "account_id": lr[1],
+            "description": lr[2],
+            "quantity": lr[3],
+            "unit_price_cents": lr[4],
+            "amount_cents": lr[5],
+            "taxes": line_taxes,
+            "tax_total_cents": line_tax_total,
+            "total_with_tax_cents": lr[5] + line_tax_total,
+        })
 
     return {
         "invoice": {
@@ -448,19 +499,11 @@ def get_invoice(
             "issue_date": row[3].isoformat(),
             "due_date": row[4].isoformat(),
             "memo": row[5],
+            "subtotal_cents": row[6] - total_tax_cents,
+            "total_tax_cents": total_tax_cents,
             "total_cents": row[6],
             "status": row[7],
-            "lines": [
-                {
-                    "id": lr[0],
-                    "account_id": lr[1],
-                    "description": lr[2],
-                    "quantity": lr[3],
-                    "unit_price_cents": lr[4],
-                    "amount_cents": lr[5],
-                }
-                for lr in line_rows
-            ],
+            "lines": lines,
         }
     }
 
