@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from db.surreal_session import SurrealDBClient, get_surreal_client
 from ledger.capital_assets import (
+    AssetType,
     CapitalAsset,
     DepreciationMethod,
     DepreciationSchedule,
@@ -21,7 +22,6 @@ from ledger.capital_assets import (
 )
 from ledger.deductions import (
     DeductionCategory,
-    DeductibleExpense,
     DeductionSummary,
     TaxBreakOpportunity,
 )
@@ -69,30 +69,36 @@ def save_capital_asset(
 ) -> int:
     """Save a capital asset to SurrealDB and return its integer ID."""
     c = _ensure_client(client)
+    aid = asset.asset_id if getattr(asset, "asset_id", None) else None
+    if not aid:
+        res = c.query("SELECT count() FROM capital_assets GROUP ALL;")
+        cnt = (
+            res[0]["result"][0]["count"] if res and res[0].get("result") else 0
+        )
+        aid = cnt + 1
+
     data = {
         "user_id": f"users:{user_id}",
         "description": asset.description,
-        "asset_type": asset.asset_type,
+        "asset_type": (
+            asset.asset_type.value
+            if hasattr(asset.asset_type, "value")
+            else str(asset.asset_type)
+        ),
         "cost_basis_cents": asset.cost_basis_cents,
         "salvage_value_cents": asset.salvage_value_cents,
         "useful_life_years": asset.useful_life_years,
         "depreciation_method": asset.depreciation_method.value,
         "date_placed_in_service": _format_dt(asset.date_placed_in_service),
         "vendor_name": asset.vendor_name,
-        "invoice_date": _format_dt(asset.invoice_date) if asset.invoice_date else None,
+        "invoice_date": (
+            _format_dt(asset.invoice_date) if asset.invoice_date else None
+        ),
         "invoice_number": asset.invoice_number,
         "notes": asset.notes,
-        "created_at": datetime.utcnow().isoformat() + "Z",
-        "updated_at": datetime.utcnow().isoformat() + "Z",
     }
-    rec = c.create("capital_assets", None, data)
-    rec_id = rec.get("id", "")
-    # SurrealDB IDs are formatted table:key; extract numeric key or hash
-    raw_id = rec_id.split(":")[-1] if ":" in str(rec_id) else str(rec_id)
-    try:
-        return int(raw_id)
-    except ValueError:
-        return abs(hash(raw_id)) % (10**9)
+    c.upsert("capital_assets", str(aid), data)
+    return int(aid)
 
 
 def load_capital_asset(
@@ -102,8 +108,12 @@ def load_capital_asset(
 ) -> Optional[CapitalAsset]:
     """Load a capital asset from SurrealDB."""
     c = _ensure_client(client)
-    target = f"capital_assets:{asset_id}" if ":" not in str(asset_id) else str(asset_id)
-    sql = f"SELECT * FROM {target} WHERE user_id = users:{user_id};"
+    target = (
+        f"capital_assets:{asset_id}"
+        if ":" not in str(asset_id)
+        else str(asset_id)
+    )
+    sql = f"SELECT * FROM {target};"
     res = c.query(sql)
     rows = res[0].get("result", [])
     if not rows:
@@ -111,20 +121,32 @@ def load_capital_asset(
     r = rows[0]
     p_date = r["date_placed_in_service"]
     if isinstance(p_date, str):
-        placed_date = datetime.fromisoformat(p_date.replace("Z", "+00:00")).date()
+        placed_date = datetime.fromisoformat(
+            p_date.replace("Z", "+00:00")
+        ).date()
     else:
         placed_date = p_date
 
     inv_date = None
     if r.get("invoice_date"):
         if isinstance(r["invoice_date"], str):
-            inv_date = datetime.fromisoformat(r["invoice_date"].replace("Z", "+00:00")).date()
+            inv_date = datetime.fromisoformat(
+                r["invoice_date"].replace("Z", "+00:00")
+            ).date()
         else:
             inv_date = r["invoice_date"]
 
+    raw_id = str(r.get("id", "")).split(":")[-1]
+    num_id = int(raw_id) if raw_id.isdigit() else (abs(hash(raw_id)) % (10**9))
+    try:
+        a_type = AssetType(r["asset_type"])
+    except (ValueError, TypeError):
+        a_type = r["asset_type"]
+
     return CapitalAsset(
+        asset_id=num_id,
         description=r["description"],
-        asset_type=r["asset_type"],
+        asset_type=a_type,
         cost_basis_cents=r["cost_basis_cents"],
         useful_life_years=r["useful_life_years"],
         date_placed_in_service=placed_date,
@@ -143,25 +165,46 @@ def load_capital_assets_for_user(
 ) -> List[CapitalAsset]:
     """Load all capital assets for a user."""
     c = _ensure_client(client)
-    sql = f"SELECT * FROM capital_assets WHERE user_id = users:{user_id};"
+    sql = f"SELECT * FROM capital_assets WHERE (user_id = 'users:{user_id}' OR user_id = users:{user_id});"
     res = c.query(sql)
     rows = res[0].get("result", [])
     assets = []
     for r in rows:
         p_date = r["date_placed_in_service"]
-        placed_date = datetime.fromisoformat(p_date.replace("Z", "+00:00")).date() if isinstance(p_date, str) else p_date
+        placed_date = (
+            datetime.fromisoformat(p_date.replace("Z", "+00:00")).date()
+            if isinstance(p_date, str)
+            else p_date
+        )
         inv_date = None
         if r.get("invoice_date"):
-            inv_date = datetime.fromisoformat(r["invoice_date"].replace("Z", "+00:00")).date() if isinstance(r["invoice_date"], str) else r["invoice_date"]
+            inv_date = (
+                datetime.fromisoformat(
+                    r["invoice_date"].replace("Z", "+00:00")
+                ).date()
+                if isinstance(r["invoice_date"], str)
+                else r["invoice_date"]
+            )
+        raw_id = str(r.get("id", "")).split(":")[-1]
+        num_id = (
+            int(raw_id) if raw_id.isdigit() else (abs(hash(raw_id)) % (10**9))
+        )
+        try:
+            a_type = AssetType(r["asset_type"])
+        except (ValueError, TypeError):
+            a_type = r["asset_type"]
         assets.append(
             CapitalAsset(
+                asset_id=num_id,
                 description=r["description"],
-                asset_type=r["asset_type"],
+                asset_type=a_type,
                 cost_basis_cents=r["cost_basis_cents"],
                 useful_life_years=r["useful_life_years"],
                 date_placed_in_service=placed_date,
                 salvage_value_cents=r.get("salvage_value_cents", 0),
-                depreciation_method=DepreciationMethod(r["depreciation_method"]),
+                depreciation_method=DepreciationMethod(
+                    r["depreciation_method"]
+                ),
                 vendor_name=r.get("vendor_name"),
                 invoice_date=inv_date,
                 invoice_number=r.get("invoice_number"),
@@ -187,16 +230,31 @@ def calculate_and_save_depreciation_schedule(
     if not asset:
         raise ValueError(f"Asset {asset_id} not found for user {user_id}")
 
-    schedule = create_depreciation_schedule(asset)
-    target_asset = f"capital_assets:{asset_id}" if ":" not in str(asset_id) else str(asset_id)
+    schedule = create_depreciation_schedule(
+        asset_id=asset_id,
+        description=asset.description,
+        cost_basis_cents=asset.cost_basis_cents,
+        salvage_value_cents=asset.salvage_value_cents,
+        depreciation_method=asset.depreciation_method,
+        date_placed_in_service=asset.date_placed_in_service,
+        recovery_period_years=asset.useful_life_years,
+    )
+    target_asset = (
+        f"capital_assets:{asset_id}"
+        if ":" not in str(asset_id)
+        else str(asset_id)
+    )
 
     # Delete existing schedule for this asset
-    c.query(f"DELETE depreciation_schedules WHERE asset_id = {target_asset} AND user_id = users:{user_id};")
+    c.query(
+        f"DELETE depreciation_schedules WHERE asset_id = '{target_asset}';"
+    )
 
     for year in schedule.years:
-        c.create(
+        sched_rec_id = f"{asset_id}_{year.year}"
+        c.upsert(
             "depreciation_schedules",
-            None,
+            sched_rec_id,
             {
                 "user_id": f"users:{user_id}",
                 "asset_id": target_asset,
@@ -204,7 +262,6 @@ def calculate_and_save_depreciation_schedule(
                 "depreciation_cents": year.depreciation_cents,
                 "accumulated_depreciation_cents": year.accumulated_depreciation_cents,
                 "book_value_cents": year.book_value_cents,
-                "created_at": datetime.utcnow().isoformat() + "Z",
             },
         )
     return schedule
@@ -214,21 +271,19 @@ def load_depreciation_schedule(
     client: Any,
     user_id: int,
     asset_id: Any,
-) -> Optional[DepreciationSchedule]:
-    """Load depreciation schedule for an asset from SurrealDB."""
+) -> List[DepreciationYear]:
+    """Load all depreciation years for an asset from SurrealDB."""
     c = _ensure_client(client)
-    asset = load_capital_asset(c, user_id, asset_id)
-    if not asset:
-        return None
-
-    target_asset = f"capital_assets:{asset_id}" if ":" not in str(asset_id) else str(asset_id)
-    sql = f"SELECT * FROM depreciation_schedules WHERE asset_id = {target_asset} AND user_id = users:{user_id} ORDER BY depreciation_year ASC;"
+    target_asset = (
+        f"capital_assets:{asset_id}"
+        if ":" not in str(asset_id)
+        else str(asset_id)
+    )
+    sql = f"SELECT * FROM depreciation_schedules WHERE asset_id = '{target_asset}' ORDER BY depreciation_year ASC;"
     res = c.query(sql)
     rows = res[0].get("result", [])
-    if not rows:
-        return None
 
-    years = [
+    return [
         DepreciationYear(
             year=r["depreciation_year"],
             depreciation_cents=r["depreciation_cents"],
@@ -237,7 +292,6 @@ def load_depreciation_schedule(
         )
         for r in rows
     ]
-    return DepreciationSchedule(asset=asset, years=years)
 
 
 # ============================================================================
@@ -254,7 +308,11 @@ def save_deduction_aggregate(
     c = _ensure_client(client)
     p_start = _format_dt(summary.period_start)
     p_end = _format_dt(summary.period_end)
-    cat = summary.category.value if hasattr(summary.category, "value") else str(summary.category)
+    cat = (
+        summary.category.value
+        if hasattr(summary.category, "value")
+        else str(summary.category)
+    )
 
     sql = f"""
     UPSERT deduction_aggregates SET
@@ -267,9 +325,12 @@ def save_deduction_aggregate(
         average_business_use_percent = {summary.business_use_percentage},
         expense_count = {summary.transaction_count},
         updated_at = time::now()
-    WHERE user_id = users:{user_id} AND period_start = '{p_start}' AND period_end = '{p_end}' AND deduction_category = '{cat}';
+    WHERE user_id = users:{user_id}
+      AND period_start = '{p_start}'
+      AND period_end = '{p_end}'
+      AND deduction_category = '{cat}';
     """
-    res = c.query(sql)
+    c.query(sql)
     return 1
 
 
@@ -285,14 +346,28 @@ def load_deduction_aggregates_for_period(
     p_end = _format_dt(period_end)
     sql = f"""
     SELECT * FROM deduction_aggregates
-    WHERE user_id = users:{user_id} AND period_start >= '{p_start}' AND period_end <= '{p_end}';
+    WHERE (user_id = 'users:{user_id}' OR user_id = users:{user_id})
+      AND period_start >= '{p_start}'
+      AND period_end <= '{p_end}';
     """
     res = c.query(sql)
     rows = res[0].get("result", [])
     summaries = []
     for r in rows:
-        ps = datetime.fromisoformat(r["period_start"].replace("Z", "+00:00")).date() if isinstance(r["period_start"], str) else r["period_start"]
-        pe = datetime.fromisoformat(r["period_end"].replace("Z", "+00:00")).date() if isinstance(r["period_end"], str) else r["period_end"]
+        ps = (
+            datetime.fromisoformat(
+                r["period_start"].replace("Z", "+00:00")
+            ).date()
+            if isinstance(r["period_start"], str)
+            else r["period_start"]
+        )
+        pe = (
+            datetime.fromisoformat(
+                r["period_end"].replace("Z", "+00:00")
+            ).date()
+            if isinstance(r["period_end"], str)
+            else r["period_end"]
+        )
         summaries.append(
             DeductionSummary(
                 category=DeductionCategory(r["deduction_category"]),
@@ -320,7 +395,11 @@ def save_estimated_tax_payment(
     """Save estimated quarterly tax payment in SurrealDB."""
     c = _ensure_client(client)
     p_date = _format_dt(estimate.due_date)
-    method = estimate.safe_harbor_method if hasattr(estimate, "safe_harbor_method") else None
+    method = (
+        estimate.safe_harbor_method
+        if hasattr(estimate, "safe_harbor_method")
+        else None
+    )
     data = {
         "user_id": f"users:{user_id}",
         "tax_year": estimate.tax_year,
@@ -341,7 +420,11 @@ def load_estimated_tax_payments_for_year(
 ) -> List[Dict[str, Any]]:
     """Load estimated tax payments for a tax year from SurrealDB."""
     c = _ensure_client(client)
-    sql = f"SELECT * FROM estimated_tax_payments WHERE user_id = users:{user_id} AND tax_year = {tax_year} ORDER BY quarter ASC;"
+    sql = (
+        "SELECT * FROM estimated_tax_payments "
+        f"WHERE (user_id = 'users:{user_id}' OR user_id = users:{user_id}) "
+        f"AND tax_year = {tax_year} ORDER BY quarter ASC;"
+    )
     res = c.query(sql)
     return res[0].get("result", [])
 
@@ -358,6 +441,16 @@ def save_tax_break_opportunity(
 ) -> int:
     """Save identified tax break opportunity in SurrealDB."""
     c = _ensure_client(client)
+    app_from = (
+        _format_dt(opp.applicable_periods[0])
+        if getattr(opp, "applicable_periods", None)
+        else None
+    )
+    app_until = (
+        _format_dt(opp.applicable_periods[-1])
+        if getattr(opp, "applicable_periods", None)
+        else None
+    )
     data = {
         "user_id": f"users:{user_id}",
         "opportunity_type": opp.opportunity_type,
@@ -367,9 +460,12 @@ def save_tax_break_opportunity(
         "tax_savings_cents": opp.tax_savings_cents,
         "estimated_marginal_rate": opp.estimated_marginal_rate,
         "status": opp.status,
-        "implementation_difficulty": getattr(opp, "implementation_difficulty", "medium"),
-        "created_at": datetime.utcnow().isoformat() + "Z",
-        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "applicable_from": app_from,
+        "applicable_until": app_until,
+        "implementation_difficulty": getattr(
+            opp, "implementation_difficulty", "medium"
+        ),
+        "notes": opp.notes,
     }
     c.create("tax_break_opportunities", None, data)
     return 1
@@ -379,25 +475,18 @@ def load_tax_break_opportunities(
     client: Any,
     user_id: int,
     status: Optional[str] = None,
-) -> List[TaxBreakOpportunity]:
+) -> List[Dict[str, Any]]:
     """Load tax break opportunities from SurrealDB."""
     c = _ensure_client(client)
     where_status = f"AND status = '{status}'" if status else ""
-    sql = f"SELECT * FROM tax_break_opportunities WHERE user_id = users:{user_id} {where_status};"
+    sql = (
+        "SELECT * FROM tax_break_opportunities "
+        f"WHERE (user_id = 'users:{user_id}' OR user_id = users:{user_id}) "
+        f"{where_status};"
+    )
     res = c.query(sql)
     rows = res[0].get("result", [])
-    return [
-        TaxBreakOpportunity(
-            opportunity_type=r["opportunity_type"],
-            description=r["description"],
-            current_deduction_cents=r["current_deduction_cents"],
-            potential_deduction_cents=r["potential_deduction_cents"],
-            tax_savings_cents=r["tax_savings_cents"],
-            estimated_marginal_rate=r.get("estimated_marginal_rate", 0.24),
-            status=r.get("status", "available"),
-        )
-        for r in rows
-    ]
+    return rows
 
 
 def save_deduction_audit_trail(

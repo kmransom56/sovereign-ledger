@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from db.surreal_session import get_surreal_client
+from db.surreal_session import get_surreal_client  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO, format="%(levelname)-7s %(name)s: %(message)s"
@@ -64,9 +64,15 @@ def init_clickhouse() -> None:
         req = urllib.request.Request(f"{CLICKHOUSE_URL}/?query=SELECT%201")
         with urllib.request.urlopen(req, timeout=5.0) as resp:
             if resp.getcode() != 200:
-                raise RuntimeError(f"ClickHouse returned HTTP {resp.getcode()}")
+                raise RuntimeError(
+                    f"ClickHouse returned HTTP {resp.getcode()}"
+                )
     except Exception as e:
-        log.warning("ClickHouse not reachable at %s: %s (skipping OLAP)", CLICKHOUSE_URL, e)
+        log.warning(
+            "ClickHouse not reachable at %s: %s (skipping OLAP)",
+            CLICKHOUSE_URL,
+            e,
+        )
         return
 
     log.info("ClickHouse ping successful at %s", CLICKHOUSE_URL)
@@ -86,12 +92,18 @@ def init_clickhouse() -> None:
 
 
 def main() -> int:
-    log.info("Starting Sovereign Ledger Dual-Database Initialization (SurrealDB + ClickHouse)...")
+    log.info(
+        "Starting Sovereign Ledger Dual-Database Initialization (SurrealDB + ClickHouse)..."
+    )
     init_surreal()
     init_clickhouse()
     print("\n✅ Sovereign Ledger Database Initialization COMPLETE:")
-    print("   • SurrealDB (Transactional/OLTP):  http://127.0.0.1:11074 (sovereign/ledger)")
-    print("   • ClickHouse (Analytics/OLAP):      http://127.0.0.1:11084 (ledger_analytics)\n")
+    print(
+        "   • SurrealDB (Transactional/OLTP):  http://127.0.0.1:11074 (sovereign/ledger)"
+    )
+    print(
+        "   • ClickHouse (Analytics/OLAP):      http://127.0.0.1:11084 (ledger_analytics)\n"
+    )
     return 0
 
 

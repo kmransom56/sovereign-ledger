@@ -70,7 +70,9 @@ class SurrealDBClient:
         except Exception:
             return False
 
-    def query(self, sql: str, vars: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    def query(
+        self, sql: str, vars: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
         """Execute SurrealQL and return parsed result array."""
         payload = sql.strip()
         headers = self._headers()
@@ -88,33 +90,61 @@ class SurrealDBClient:
                 data = json.loads(resp.read().decode("utf-8"))
                 for item in data:
                     if item.get("status") == "ERR":
-                        raise RuntimeError(f"SurrealDB error: {item.get('result')}")
+                        raise RuntimeError(
+                            f"SurrealDB error: {item.get('result')}"
+                        )
                 return data
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"HTTP {e.code} from SurrealDB: {error_body}") from e
+            raise RuntimeError(
+                f"HTTP {e.code} from SurrealDB: {error_body}"
+            ) from e
 
-    def create(self, table: str, record_id: Optional[str], data: Dict[str, Any]) -> Dict[str, Any]:
+    def create(
+        self, table: str, record_id: Optional[str], data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Create a record in a table."""
         target = f"{table}:{record_id}" if record_id else table
-        body = json.dumps(data)
+        clean_data = {k: v for k, v in data.items() if v is not None}
+        body = json.dumps(clean_data)
         sql = f"CREATE {target} CONTENT {body};"
         res = self.query(sql)
         items = res[0].get("result", [])
         return items[0] if items else {}
 
-    def select(self, table: str, record_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def select(
+        self, table: str, record_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """Select records from table."""
         target = f"{table}:{record_id}" if record_id else table
         sql = f"SELECT * FROM {target};"
         res = self.query(sql)
         return res[0].get("result", [])
 
-    def update(self, table: str, record_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    def update(
+        self, table: str, record_id: str, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Update a record in a table."""
         target = f"{table}:{record_id}"
-        body = json.dumps(data)
+        clean_data = {k: v for k, v in data.items() if v is not None}
+        body = json.dumps(clean_data)
         sql = f"UPDATE {target} MERGE {body};"
+        res = self.query(sql)
+        items = res[0].get("result", [])
+        return items[0] if items else {}
+
+    def upsert(
+        self, table: str, record_id: str, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Upsert (create or merge) a record in a table."""
+        target = (
+            f"{table}:{record_id}"
+            if ":" not in str(record_id)
+            else str(record_id)
+        )
+        clean_data = {k: v for k, v in data.items() if v is not None}
+        body = json.dumps(clean_data)
+        sql = f"UPSERT {target} MERGE {body};"
         res = self.query(sql)
         items = res[0].get("result", [])
         return items[0] if items else {}
