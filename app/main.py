@@ -55,7 +55,7 @@ def create_app(
     )
 
     # Register routers (Step 4: auth; Step 5: accounts, entries, reports;
-    # Step 7: bank upload, import review, reconciliation).
+    # Step 7: bank upload, import review, reconciliation; Step 9: AR posting).
     from app.routes.auth import router as auth_router
     from app.routes.accounts import router as accounts_router
     from app.routes.entries import router as entries_router
@@ -63,6 +63,7 @@ def create_app(
     from app.routes.bank import router as bank_router
     from app.routes.import_review import router as review_router
     from app.routes.reconcile import router as reconcile_router
+    from app.routes.ar import router as ar_router
 
     app.include_router(auth_router)
     app.include_router(accounts_router)
@@ -71,6 +72,7 @@ def create_app(
     app.include_router(bank_router)
     app.include_router(review_router)
     app.include_router(reconcile_router)
+    app.include_router(ar_router)
 
     @app.get("/healthz", tags=["meta"])
     def healthz() -> dict[str, str]:
