@@ -1,4 +1,4 @@
-"""Tax support: rates, jurisdiction management, and tax calculations (Step 11)."""
+-- Tax support: rates, jurisdiction management, and tax calculations (Step 11).
 
 -- Tax jurisdictions (states, countries, local)
 CREATE TABLE tax_jurisdictions (

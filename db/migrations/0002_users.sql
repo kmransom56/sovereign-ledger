@@ -64,3 +64,14 @@ CREATE INDEX idx_user_sessions_expires ON user_sessions (expires_at);
 -- Grant the app role access (INSERT for login, SELECT for verify, DELETE for logout).
 GRANT SELECT, INSERT, DELETE ON users, user_sessions TO ledger_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ledger_app;
+-- ---------------------------------------------------------------------------
+-- current_user_id() — returns the app-level user ID from session context.
+--
+-- The application sets `SET LOCAL app.user_id = <id>` at the start of each
+-- transaction.  RLS policies and audit triggers call this function to
+-- enforce per-user row isolation without a hardcoded user.
+-- Returns NULL if not set (allows superuser / migration connections).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION current_user_id() RETURNS BIGINT AS $$
+    SELECT NULLIF(current_setting('app.user_id', true), '')::BIGINT
+$$ LANGUAGE SQL STABLE;

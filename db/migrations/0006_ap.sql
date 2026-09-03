@@ -1,4 +1,4 @@
-"""Accounts Payable support: vendors, bills, payments, expense tracking (Step 12)."""
+-- AP support: vendors, bills, payments (Step 12).
 
 -- Vendors/suppliers
 CREATE TABLE vendors (
@@ -98,7 +98,7 @@ SELECT
         WHEN CURRENT_DATE > b.due_date THEN 'Overdue'
         ELSE 'Current'
     END as aging_status,
-    EXTRACT(DAY FROM CURRENT_DATE - b.due_date) as days_overdue
+    (CURRENT_DATE - b.due_date) as days_overdue
 FROM bills b
 JOIN vendors v ON b.vendor_id = v.id
 WHERE b.status NOT IN ('voided')

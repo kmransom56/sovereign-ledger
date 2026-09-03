@@ -13,6 +13,11 @@ from ledger.periods import FiscalPeriod, PeriodStatus
 
 #: Map the DB's capitalized plural account_type to the domain enum value.
 _DB_TYPE_MAP = {
+    "Assets": AccountType.ASSET,
+    "Liabilities": AccountType.LIABILITY,
+    "Equity": AccountType.EQUITY,
+    "Income": AccountType.INCOME,
+    "Expenses": AccountType.EXPENSE,
     "assets": AccountType.ASSET,
     "liabilities": AccountType.LIABILITY,
     "equity": AccountType.EQUITY,
@@ -236,3 +241,51 @@ def insert_journal_entry(conn: psycopg.Connection, entry: JournalEntry) -> None:
                     line.credit
                 )
             )
+
+def load_journal_entries(conn: psycopg.Connection) -> list[dict[str, Any]]:
+    """Load all journal entries with their lines for display."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT je.id, je.description, je.created_at "
+            "FROM journal_entries je "
+            "ORDER BY je.created_at DESC"
+        )
+        entries = []
+        for row in cur.fetchall():
+            entry = dict(row)
+            # Load lines for this entry
+            cur.execute(
+                "SELECT account_name, debit, credit "
+                "FROM journal_lines "
+                "WHERE journal_entry_id = %s "
+                "ORDER BY id",
+                (entry["id"],)
+            )
+            entry["lines"] = [dict(l) for l in cur.fetchall()]
+            entries.append(entry)
+    return entries
+
+
+def find_period_for_date(conn: psycopg.Connection, target_date: date) -> FiscalPeriod | None:
+    """Find the fiscal period that contains the target date."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT name, start_date, end_date, status "
+            "FROM fiscal_periods "
+            "WHERE %s BETWEEN start_date AND end_date",
+            (target_date,)
+        )
+        row = cur.fetchone()
+    if row is None:
+        return None
+    return FiscalPeriod(
+        name=row["name"],
+        start_date=row["start_date"],
+        end_date=row["end_date"],
+        status=PeriodStatus(row["status"])
+    )
+
+
+# Alias for backwards compat with entries.py
+load_periods = load_fiscal_periods
+

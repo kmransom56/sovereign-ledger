@@ -73,7 +73,7 @@ def dashboard(
                 detail="Not authenticated as customer",
             )
 
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             # Get customer info
             cur.execute(
                 "SELECT id, name, email FROM customers WHERE id = %s",
@@ -201,7 +201,7 @@ def list_invoices(
                 detail="Not authenticated as customer",
             )
 
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             query = (
                 "SELECT id, invoice_number, issue_date, due_date, total_amount_cents, status, "
                 "CAST((CURRENT_DATE - due_date) AS INTEGER) as days_overdue "
@@ -258,7 +258,7 @@ def get_invoice_detail(
                 detail="Not authenticated as customer",
             )
 
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             # Get invoice
             cur.execute(
                 "SELECT i.id, i.invoice_number, i.issue_date, i.due_date, i.total_amount_cents, "
@@ -340,7 +340,7 @@ def list_payments(
                 detail="Not authenticated as customer",
             )
 
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             # Get payments
             cur.execute(
                 "SELECT id, payment_date, amount_cents, memo FROM payments "
@@ -399,7 +399,7 @@ def payment_form(
                 detail="Not authenticated as customer",
             )
 
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             # Get outstanding invoices
             cur.execute(
                 "SELECT id, invoice_number, issue_date, due_date, total_amount_cents, status "
@@ -465,7 +465,7 @@ async def record_payment(
 
         # Get invoice allocations from form
         invoices = []
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
                 "SELECT id, total_amount_cents FROM invoices "
                 "WHERE customer_id = %s AND status IN ('posted', 'partial') "
@@ -490,7 +490,7 @@ async def record_payment(
         allocations, overpayment = allocate_payment(amount_cents, invoices)
 
         # Record payment (simplified - would call post_payment in production)
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
                 "INSERT INTO payments (customer_id, payment_date, amount_cents, memo) "
                 "VALUES (%s, %s, %s, %s) RETURNING id",

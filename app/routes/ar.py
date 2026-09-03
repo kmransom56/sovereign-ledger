@@ -87,7 +87,7 @@ def create_customer(
 
     conn: psycopg.Connection = request.app.state.db
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
                 "INSERT INTO customers (name, tax_id, email, address, notes, status) "
                 "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
@@ -117,7 +117,7 @@ def list_customers(
     """List all customers."""
     conn: psycopg.Connection = request.app.state.db
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
                 "SELECT id, name, tax_id, email, status FROM customers ORDER BY created_at DESC"
             )
@@ -151,7 +151,7 @@ def get_customer(
     """Get customer detail."""
     conn: psycopg.Connection = request.app.state.db
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
                 "SELECT id, name, tax_id, email, address, notes, status, created_at "
                 "FROM customers WHERE id = %s",
@@ -202,7 +202,7 @@ def update_customer_status(
 
     conn: psycopg.Connection = request.app.state.db
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
                 "UPDATE customers SET status = %s WHERE id = %s",
                 (new_status, customer_id),
@@ -378,7 +378,7 @@ def list_invoices(
     query += " ORDER BY issue_date DESC"
 
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(query, params)
             rows = cur.fetchall()
     except Exception as exc:
@@ -412,7 +412,7 @@ def get_invoice(
     """Get invoice detail with line items and tax breakdown."""
     conn: psycopg.Connection = request.app.state.db
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
                 "SELECT id, invoice_number, customer_id, issue_date, due_date, memo, "
                 "total_amount_cents, status FROM invoices WHERE id = %s",
@@ -642,7 +642,7 @@ def list_payments(
     query += " ORDER BY payment_date DESC"
 
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(query, params)
             rows = cur.fetchall()
     except Exception as exc:
@@ -699,7 +699,7 @@ def create_recurring_template(
 
     conn: psycopg.Connection = request.app.state.db
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
                 "INSERT INTO recurring_templates "
                 "(customer_id, name, description, amount_cents, due_days_offset, "
@@ -751,7 +751,7 @@ def list_recurring_templates(
     query += " ORDER BY created_at DESC"
 
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(query, params)
             rows = cur.fetchall()
     except Exception as exc:
@@ -794,7 +794,7 @@ def update_recurring_template_status(
 
     conn: psycopg.Connection = request.app.state.db
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
                 "UPDATE recurring_templates SET status = %s WHERE id = %s RETURNING id",
                 (new_status, template_id),
@@ -836,7 +836,7 @@ def update_recurring_template_price(
 
     conn: psycopg.Connection = request.app.state.db
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
                 "UPDATE recurring_templates SET amount_cents = %s WHERE id = %s RETURNING id",
                 (amount_cents, template_id),
@@ -891,7 +891,7 @@ def preview_recurring_generation(
 
     conn: psycopg.Connection = request.app.state.db
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
                 "SELECT id, customer_id, name, description, amount_cents, due_days_offset, "
                 "status, active_from, active_until, line_account_id, created_at "
@@ -982,7 +982,7 @@ def update_invoice_status(
 
     conn: psycopg.Connection = request.app.state.db
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             # Verify invoice exists
             cur.execute("SELECT status FROM invoices WHERE id = %s", (invoice_id,))
             row = cur.fetchone()
@@ -1031,7 +1031,7 @@ def report_ar_aging(
     """AR aging report: invoices grouped by days overdue."""
     conn: psycopg.Connection = request.app.state.db
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             # Fetch all open invoices with customer names and days overdue
             cur.execute(
                 """
@@ -1134,7 +1134,7 @@ def report_customer_statement(
 
     conn: psycopg.Connection = request.app.state.db
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             # Fetch customer
             cur.execute(
                 "SELECT id, name, tax_id, email, status FROM customers WHERE id = %s",
@@ -1249,7 +1249,7 @@ def report_overdue_invoices(
     """Overdue invoices report: invoices past due date."""
     conn: psycopg.Connection = request.app.state.db
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
                 """
                 SELECT
