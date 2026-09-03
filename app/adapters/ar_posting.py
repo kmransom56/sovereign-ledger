@@ -22,6 +22,7 @@ from ledger.customers import Customer
 from ledger.invoices import InvoiceDraft, invoice_journal_entry
 from ledger.payments import Payment, allocate_payment, payment_journal_entry
 from ledger.recurring import RecurringTemplate, generate_invoice_for_cycle
+from ledger.taxes import calculate_invoice_taxes, tax_journal_entry, TaxRate, TaxExemption
 from ledger.types import AccountRef, AccountType
 
 if TYPE_CHECKING:
@@ -171,22 +172,149 @@ def validate_customer_active(
     return customer
 
 
+def load_tax_rates_for_jurisdictions(
+    conn: psycopg.Connection,
+    jurisdiction_codes: list[str],
+    as_of: date,
+) -> dict[str, TaxRate | None]:
+    """Load effective tax rates for jurisdictions as of a date.
+
+    Args:
+        conn: Database connection.
+        jurisdiction_codes: List of jurisdiction codes (e.g., ["CA", "TX"]).
+        as_of: Date to find effective rate.
+
+    Returns:
+        Mapping of jurisdiction_code → TaxRate or None if no rate effective.
+    """
+    if not jurisdiction_codes:
+        return {}
+
+    placeholders = ",".join(["%s"] * len(jurisdiction_codes))
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT tj.code, tr.rate_percent, tr.effective_from, tr.effective_until
+            FROM tax_rates tr
+            JOIN tax_jurisdictions tj ON tr.jurisdiction_id = tj.id
+            WHERE tj.code IN ({placeholders})
+            ORDER BY tr.effective_from DESC
+            """,
+            jurisdiction_codes,
+        )
+        rows = cur.fetchall()
+
+    # Build dict of code → list of rates, then pick effective one
+    rates_by_jurisdiction = {}
+    for code, rate_percent, effective_from, effective_until in rows:
+        if code not in rates_by_jurisdiction:
+            rates_by_jurisdiction[code] = []
+        rates_by_jurisdiction[code].append(
+            TaxRate(
+                jurisdiction_code=code,
+                rate_percent=rate_percent,
+                effective_from=effective_from,
+                effective_until=effective_until,
+            )
+        )
+
+    result = {}
+    for code in jurisdiction_codes:
+        # Find first (most recent) rate that's effective on as_of
+        applicable = [
+            r for r in rates_by_jurisdiction.get(code, [])
+            if r.effective_from <= as_of
+            and (r.effective_until is None or as_of <= r.effective_until)
+        ]
+        result[code] = applicable[0] if applicable else None
+
+    return result
+
+
+def load_tax_exemptions_for_customer(
+    conn: psycopg.Connection,
+    customer_id: int,
+    jurisdiction_codes: list[str],
+    as_of: date,
+) -> dict[str, TaxExemption | None]:
+    """Load effective tax exemptions for customer by jurisdiction.
+
+    Args:
+        conn: Database connection.
+        customer_id: Customer ID.
+        jurisdiction_codes: List of jurisdiction codes.
+        as_of: Date to find effective exemption.
+
+    Returns:
+        Mapping of jurisdiction_code → TaxExemption or None if none active.
+    """
+    if not jurisdiction_codes:
+        return {}
+
+    placeholders = ",".join(["%s"] * len(jurisdiction_codes))
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT tj.code, cte.customer_id, tj.code, cte.exemption_type,
+                   cte.effective_from, cte.effective_until
+            FROM customer_tax_exemptions cte
+            JOIN tax_jurisdictions tj ON cte.jurisdiction_id = tj.id
+            WHERE cte.customer_id = %s AND tj.code IN ({placeholders}) AND cte.active
+            ORDER BY cte.effective_from DESC
+            """,
+            [customer_id] + jurisdiction_codes,
+        )
+        rows = cur.fetchall()
+
+    # Build dict and find effective exemptions
+    exemptions_by_jurisdiction = {}
+    for code, cust_id, jur_code, exemption_type, effective_from, effective_until in rows:
+        if code not in exemptions_by_jurisdiction:
+            exemptions_by_jurisdiction[code] = []
+        exemptions_by_jurisdiction[code].append(
+            TaxExemption(
+                customer_id=cust_id,
+                jurisdiction_code=jur_code,
+                exemption_type=exemption_type,
+                effective_from=effective_from,
+                effective_until=effective_until,
+            )
+        )
+
+    result = {}
+    for code in jurisdiction_codes:
+        # Find first (most recent) exemption that's effective on as_of
+        applicable = [
+            e for e in exemptions_by_jurisdiction.get(code, [])
+            if e.effective_from <= as_of
+            and (e.effective_until is None or as_of <= e.effective_until)
+        ]
+        result[code] = applicable[0] if applicable else None
+
+    return result
+
+
 def post_invoice(
     conn: psycopg.Connection,
     draft: InvoiceDraft,
     ar_account_id: int,
     fiscal_period_id: int,
+    tax_payable_account_id: int | None = None,
+    tax_jurisdictions: dict[int, str] | None = None,
 ) -> int:
-    """Post an invoice draft to the ledger (CK-5).
+    """Post an invoice draft to the ledger with tax calculation (T-10).
 
-    Creates balanced journal entry (Dr AR / Cr Income), assigns gapless invoice
-    number (D-10), and inserts all records in one transaction.
+    Creates balanced journal entry (Dr AR / Cr Income), calculates taxes (T-10),
+    assigns gapless invoice number (D-10), and inserts all records in one
+    transaction.
 
     Args:
         conn: Database connection.
         draft: Invoice draft ready to post.
         ar_account_id: AR asset account ID.
         fiscal_period_id: Open fiscal period ID.
+        tax_payable_account_id: Tax payable liability account ID (optional).
+        tax_jurisdictions: Mapping of line index → jurisdiction code (optional).
 
     Returns:
         Newly posted invoice ID.
@@ -204,22 +332,62 @@ def post_invoice(
     # Collect all income account IDs from line items
     line_account_ids = [line.account_id for line in draft.lines]
     all_account_ids = [ar_account_id] + line_account_ids
+    if tax_payable_account_id:
+        all_account_ids.append(tax_payable_account_id)
 
     # Load all account references
     account_refs = load_account_refs(conn, all_account_ids)
     ar_account_ref = account_refs[ar_account_id]
     income_refs = {line.account_id: account_refs[line.account_id] for line in draft.lines}
+    tax_payable_ref = account_refs[tax_payable_account_id] if tax_payable_account_id else None
+
+    # Calculate taxes if enabled and jurisdictions provided (T-10: deferred until posting)
+    tax_calculation = None
+    if tax_jurisdictions and tax_payable_account_id:
+        # Build line_amounts with jurisdiction codes
+        line_amounts = []
+        for idx, line in enumerate(draft.lines):
+            jurisdiction = tax_jurisdictions.get(idx, "")
+            line_amounts.append((line.amount_cents, jurisdiction))
+
+        # Get unique jurisdictions
+        jurisdictions = {tax_jurisdictions.get(idx, "") for idx in range(len(draft.lines))}
+        jurisdictions = {j for j in jurisdictions if j}  # Filter empty
+
+        if jurisdictions:
+            # Load tax rates and exemptions
+            tax_rates = load_tax_rates_for_jurisdictions(conn, list(jurisdictions), draft.issue_date)
+            exemptions = load_tax_exemptions_for_customer(
+                conn, draft.customer_id, list(jurisdictions), draft.issue_date
+            )
+
+            # Convert to dict format expected by calculate_invoice_taxes
+            tax_rates_dict = {code: rate for code, rate in tax_rates.items() if rate}
+            exemptions_dict = {code: exemption for code, exemption in exemptions.items() if exemption}
+
+            # Calculate taxes
+            tax_calculation = calculate_invoice_taxes(
+                line_amounts,
+                tax_rates_dict,
+                draft.issue_date,
+                exemptions_dict if exemptions_dict else None,
+            )
 
     # Generate entry ID (deterministic based on customer + date)
     entry_id = f"inv-{draft.customer_id}-{draft.issue_date.isoformat()}-{uuid.uuid4().hex[:8]}"
 
-    # Construct balanced journal entry
-    entry, total_amount_cents = invoice_journal_entry(
+    # Construct balanced journal entry (without tax)
+    entry, subtotal_amount_cents = invoice_journal_entry(
         draft,
         ar_account_ref=ar_account_ref,
         income_account_refs=income_refs,
         entry_id=entry_id,
     )
+
+    # Calculate final total including tax
+    total_amount_cents = subtotal_amount_cents
+    if tax_calculation:
+        total_amount_cents = tax_calculation.total_with_tax_cents
 
     # Post in transaction: get gapless number, insert all records
     try:
@@ -280,12 +448,13 @@ def post_invoice(
                 )
                 invoice_id = cur.fetchone()[0]
 
-                # Insert invoice lines
+                # Insert invoice lines and collect their IDs
+                invoice_line_ids = []
                 for line in draft.lines:
                     cur.execute(
                         "INSERT INTO invoice_lines "
                         "(invoice_id, account_id, description, quantity, unit_price_cents, amount_cents) "
-                        "VALUES (%s, %s, %s, %s, %s, %s)",
+                        "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
                         (
                             invoice_id,
                             line.account_id,
@@ -295,6 +464,132 @@ def post_invoice(
                             line.amount_cents,
                         ),
                     )
+                    invoice_line_ids.append(cur.fetchone()[0])
+
+                # Insert invoice line taxes if calculated
+                if tax_calculation:
+                    # Get jurisdiction IDs for lookup
+                    jurisdictions = {tax_jurisdictions.get(idx, "") for idx in range(len(draft.lines))}
+                    jurisdictions = {j for j in jurisdictions if j}
+
+                    # Build jurisdiction_code → id mapping
+                    if jurisdictions:
+                        placeholders = ",".join(["%s"] * len(jurisdictions))
+                        cur.execute(
+                            f"SELECT id, code FROM tax_jurisdictions WHERE code IN ({placeholders})",
+                            list(jurisdictions),
+                        )
+                        jur_rows = cur.fetchall()
+                        jur_id_map = {code: jur_id for jur_id, code in jur_rows}
+
+                        # Insert tax records for each line tax
+                        for line_idx, line_tax in enumerate(tax_calculation.line_taxes):
+                            jurisdiction_id = jur_id_map.get(line_tax.jurisdiction_code)
+                            if not jurisdiction_id or line_idx >= len(invoice_line_ids):
+                                continue
+
+                            # Find matching tax rate
+                            cur.execute(
+                                """
+                                SELECT id FROM tax_rates
+                                WHERE jurisdiction_id = %s AND rate_percent = %s
+                                ORDER BY effective_from DESC LIMIT 1
+                                """,
+                                (jurisdiction_id, line_tax.rate_percent),
+                            )
+                            tax_rate_row = cur.fetchone()
+                            tax_rate_id = tax_rate_row[0] if tax_rate_row else None
+
+                            exemption_id = None
+                            if tax_rate_id and line_tax.exemption_code:
+                                # Find exemption ID
+                                cur.execute(
+                                    """
+                                    SELECT cte.id FROM customer_tax_exemptions cte
+                                    WHERE cte.customer_id = %s AND cte.jurisdiction_id = %s
+                                    AND cte.exemption_type = %s AND cte.active
+                                    ORDER BY cte.effective_from DESC LIMIT 1
+                                    """,
+                                    (draft.customer_id, jurisdiction_id, line_tax.exemption_code),
+                                )
+                                exemption_row = cur.fetchone()
+                                exemption_id = exemption_row[0] if exemption_row else None
+
+                            # Insert invoice_line_tax record
+                            if tax_rate_id:
+                                cur.execute(
+                                    """
+                                    INSERT INTO invoice_line_taxes
+                                    (invoice_id, invoice_line_id, jurisdiction_id, tax_rate_id,
+                                     taxable_amount_cents, tax_amount_cents, exemption_id)
+                                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                    """,
+                                    (
+                                        invoice_id,
+                                        invoice_line_ids[line_idx],
+                                        jurisdiction_id,
+                                        tax_rate_id,
+                                        line_tax.taxable_amount_cents,
+                                        line_tax.tax_amount_cents,
+                                        exemption_id,
+                                    ),
+                                )
+
+                    # Insert tax liability and journal entry if there's tax
+                    if tax_calculation.total_tax_cents > 0 and tax_payable_ref:
+                        # Create tax journal entry
+                        tax_entry = tax_journal_entry(
+                            tax_calculation,
+                            sales_account_ref=ar_account_ref,
+                            tax_payable_account_ref=tax_payable_ref,
+                            entry_id=f"tax-{invoice_id}-{draft.issue_date.isoformat()}",
+                            entry_date=draft.issue_date,
+                        )
+
+                        # Insert tax journal entry
+                        cur.execute(
+                            "INSERT INTO journal_entries (id, entry_date, description, fiscal_period_id) "
+                            "VALUES (%s, %s, %s, %s) RETURNING id",
+                            (tax_entry.entry_id, tax_entry.date, tax_entry.description, fiscal_period_id),
+                        )
+                        tax_posted_entry_id = cur.fetchone()[0]
+
+                        # Insert tax journal lines
+                        for line in tax_entry.lines:
+                            cur.execute(
+                                "INSERT INTO journal_lines (journal_entry_id, account_id, amount_cents) "
+                                "VALUES (%s, %s, %s)",
+                                (tax_posted_entry_id, int(line.account.code), line.amount_cents),
+                            )
+
+                        # Get jurisdiction ID for tax liability
+                        jurisdiction_id = None
+                        if len(tax_calculation.line_taxes) > 0:
+                            first_tax = tax_calculation.line_taxes[0]
+                            cur.execute(
+                                "SELECT id FROM tax_jurisdictions WHERE code = %s LIMIT 1",
+                                (first_tax.jurisdiction_code,),
+                            )
+                            jur_row = cur.fetchone()
+                            jurisdiction_id = jur_row[0] if jur_row else None
+
+                        if jurisdiction_id:
+                            # Insert tax liability record
+                            cur.execute(
+                                """
+                                INSERT INTO tax_liability
+                                (jurisdiction_id, invoice_id, period_end, collected_cents, posted_entry_id, status)
+                                VALUES (%s, %s, %s, %s, %s, %s)
+                                """,
+                                (
+                                    jurisdiction_id,
+                                    invoice_id,
+                                    draft.due_date,
+                                    tax_calculation.total_tax_cents,
+                                    tax_posted_entry_id,
+                                    "accrued",
+                                ),
+                            )
 
                 # Increment counter
                 cur.execute(
