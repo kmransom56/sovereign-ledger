@@ -1,0 +1,21 @@
+[Unit]
+Description=Sovereign Ledger App (FastAPI + uvicorn)
+After=sovereign-ledger-db.service
+Wants=sovereign-ledger-db.service
+
+[Container]
+Image=sovereign-ledger:latest
+ContainerName=sovereign-ledger-app
+PublishPort=127.0.0.1:11240:11240
+Environment=LEDGER_DATABASE_URL=postgresql://ledger:ledger@127.0.0.1:11241/ledger
+Environment=LEDGER_SESSION_SECRET=CHANGE-ME-IN-PRODUCTION
+Environment=LEDGER_COOKIE_SECURE=true
+Volume=/media/keith/NVMe/sovereign-ledger:/app:Z
+AutoUpdate=registry
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

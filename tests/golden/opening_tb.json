@@ -1,0 +1,37 @@
+{
+  "is_balanced": true,
+  "total_debit_cents": 230000,
+  "total_credit_cents": 230000,
+  "rows": [
+    {
+      "account_code": "1000",
+      "account_name": "1000 Checking Account",
+      "debit_cents": 150000,
+      "credit_cents": 10000
+    },
+    {
+      "account_code": "1200",
+      "account_name": "1200 Accounts Receivable",
+      "debit_cents": 30000,
+      "credit_cents": 0
+    },
+    {
+      "account_code": "1500",
+      "account_name": "1500 Business Equipment",
+      "debit_cents": 50000,
+      "credit_cents": 0
+    },
+    {
+      "account_code": "2000",
+      "account_name": "2000 Accounts Payable",
+      "debit_cents": 0,
+      "credit_cents": 45000
+    },
+    {
+      "account_code": "3000",
+      "account_name": "3000 Owner's Capital",
+      "debit_cents": 0,
+      "credit_cents": 175000
+    }
+  ]
+}

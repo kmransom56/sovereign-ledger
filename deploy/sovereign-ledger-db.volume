@@ -1,0 +1,4 @@
+[Volume]
+VolumeName=sovereign-ledger-db
+Device=/media/keith/NVMe/sovereign-ledger-pg-data
+Label=io.containers.autoupdate=registry

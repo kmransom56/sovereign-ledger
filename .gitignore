@@ -1,0 +1,38 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Unit test / coverage / hypothesis
+.coverage
+.coverage.*
+.hypothesis/
+.pytest_cache/
+htmlcov/
+
+# Local environments / secrets
+.env
+.env.*
+*.local
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Specs scratchpads & dynamic reports
+.specs/scratchpad/*.md
+.specs/analysis/*.md
+.specs/reports/*.md
+

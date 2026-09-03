@@ -1,0 +1,20 @@
+[Unit]
+Description=Sovereign Ledger PostgreSQL 16
+After=local-fs.target
+
+[Container]
+Image=docker.io/library/postgres:16-alpine
+ContainerName=sovereign-ledger-db
+PublishPort=127.0.0.1:11241:5432
+Environment=POSTGRES_USER=ledger
+Environment=POSTGRES_PASSWORD=ledger
+Environment=POSTGRES_DB=ledger
+Volume=sovereign-ledger-db:/var/lib/postgresql/data:Z
+AutoUpdate=registry
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
