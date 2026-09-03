@@ -17,7 +17,34 @@ The convention is encoded structurally: ``JournalLine.debit`` /
 side. Property tests in ``tests/test_engine.py`` pin it.
 """
 
+from ledger.customers import Customer, CustomerStatus, new_customer
 from ledger.engine import PostedEntry, post, post_lines, validate_balanced
+from ledger.invoices import (
+    Invoice,
+    InvoiceDraft,
+    InvoiceLine,
+    add_line_to_draft,
+    invoice_journal_entry,
+    mark_paid,
+    mark_void,
+    new_invoice_draft,
+)
+from ledger.payments import (
+    Payment,
+    PaymentAllocationLine,
+    allocate_payment,
+    payment_journal_entry,
+)
+from ledger.recurring import (
+    GenerationResult,
+    RecurringTemplate,
+    generate_invoice_for_cycle,
+    mark_template_active,
+    mark_template_ended,
+    mark_template_paused,
+    new_template,
+    should_generate_for_cycle,
+)
 from ledger.types import (
     BIGINT_MAX_CENTS,
     AccountRef,
@@ -31,6 +58,7 @@ from ledger.types import (
 )
 
 __all__ = [
+    # Core
     "BIGINT_MAX_CENTS",
     "AccountRef",
     "AccountType",
@@ -44,4 +72,31 @@ __all__ = [
     "post",
     "post_lines",
     "validate_balanced",
+    # Customers
+    "Customer",
+    "CustomerStatus",
+    "new_customer",
+    # Invoices
+    "Invoice",
+    "InvoiceDraft",
+    "InvoiceLine",
+    "add_line_to_draft",
+    "invoice_journal_entry",
+    "mark_paid",
+    "mark_void",
+    "new_invoice_draft",
+    # Payments
+    "Payment",
+    "PaymentAllocationLine",
+    "allocate_payment",
+    "payment_journal_entry",
+    # Recurring
+    "GenerationResult",
+    "RecurringTemplate",
+    "generate_invoice_for_cycle",
+    "mark_template_active",
+    "mark_template_ended",
+    "mark_template_paused",
+    "new_template",
+    "should_generate_for_cycle",
 ]
