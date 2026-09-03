@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Invoices - Sovereign Ledger{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">Invoices</div>
+        <div class="card-subtitle">All invoices for your account</div>
+    </div>
+
+    {% if invoices %}
+    <table>
+        <thead>
+            <tr>
+                <th>Invoice #</th>
+                <th>Date</th>
+                <th>Due Date</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Days Overdue</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for invoice in invoices %}
+            <tr>
+                <td><strong><a href="/portal/invoices/{{ invoice.id }}" style="color: var(--primary); text-decoration: none;">#{{ invoice.invoice_number }}</a></strong></td>
+                <td>{{ invoice.issue_date | format_date }}</td>
+                <td>{{ invoice.due_date | format_date }}</td>
+                <td class="amount">${{ (invoice.amount_cents / 100) | format_currency }}</td>
+                <td>
+                    {% if invoice.status == 'posted' %}
+                        <span class="badge badge-warning">Outstanding</span>
+                    {% elif invoice.status == 'paid' %}
+                        <span class="badge badge-success">Paid</span>
+                    {% elif invoice.status == 'void' %}
+                        <span class="badge badge-danger">Void</span>
+                    {% else %}
+                        <span class="badge badge-info">{{ invoice.status | title }}</span>
+                    {% endif %}
+                </td>
+                <td class="amount">
+                    {% if invoice.days_overdue and invoice.days_overdue > 0 %}
+                        <span style="color: var(--danger); font-weight: 600;">{{ invoice.days_overdue }} days</span>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="/portal/invoices/{{ invoice.id }}" class="button button-primary button-small">View</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: var(--gray-600); padding: 1rem 0;">No invoices yet.</p>
+    {% endif %}
+</div>
+
+{% endblock %}

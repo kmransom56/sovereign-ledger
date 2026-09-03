@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Invoice #{{ invoice.invoice_number }} - Sovereign Ledger{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">Invoice #{{ invoice.invoice_number }}</div>
+        <div class="card-subtitle">
+            {% if invoice.status == 'posted' %}
+                <span class="badge badge-warning">Outstanding</span>
+            {% elif invoice.status == 'paid' %}
+                <span class="badge badge-success">Paid</span>
+            {% elif invoice.status == 'void' %}
+                <span class="badge badge-danger">Void</span>
+            {% endif %}
+            • Issued {{ invoice.issue_date | format_date }} • Due {{ invoice.due_date | format_date }}
+        </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+        <div>
+            <div style="color: var(--gray-600); font-size: 0.875rem; text-transform: uppercase; font-weight: 600; margin-bottom: 0.5rem;">From</div>
+            <div style="font-weight: 600;">{{ company_name }}</div>
+        </div>
+        <div>
+            <div style="color: var(--gray-600); font-size: 0.875rem; text-transform: uppercase; font-weight: 600; margin-bottom: 0.5rem;">Bill To</div>
+            <div>
+                <div style="font-weight: 600;">{{ invoice.customer_name }}</div>
+                <div style="font-size: 0.875rem; color: var(--gray-600);">{{ invoice.customer_email }}</div>
+            </div>
+        </div>
+    </div>
+
+    <table style="margin-bottom: 2rem;">
+        <thead>
+            <tr>
+                <th style="text-align: left;">Description</th>
+                <th style="text-align: right;">Quantity</th>
+                <th style="text-align: right;">Unit Price</th>
+                <th style="text-align: right;">Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for line in invoice.lines %}
+            <tr>
+                <td>{{ line.description }}</td>
+                <td class="amount">{{ line.quantity }}</td>
+                <td class="amount">${{ (line.unit_price_cents / 100) | format_currency }}</td>
+                <td class="amount"><strong>${{ (line.amount_cents / 100) | format_currency }}</strong></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div style="display: flex; justify-content: flex-end; margin-bottom: 2rem;">
+        <div style="width: 300px; text-align: right;">
+            <div style="display: flex; justify-content: space-between; padding-bottom: 0.75rem; border-bottom: 2px solid var(--gray-200);">
+                <span style="font-weight: 600;">Total Amount:</span>
+                <span style="font-size: 1.5rem; font-weight: 700;">${{ (invoice.amount_cents / 100) | format_currency }}</span>
+            </div>
+        </div>
+    </div>
+
+    {% if invoice.memo %}
+    <div style="background: var(--gray-50); padding: 1rem; border-radius: 0.375rem; margin-bottom: 2rem;">
+        <div style="font-size: 0.875rem; color: var(--gray-600); font-weight: 600; margin-bottom: 0.5rem;">Memo</div>
+        <div>{{ invoice.memo }}</div>
+    </div>
+    {% endif %}
+
+    <div class="button-group">
+        <a href="/portal/invoices" class="button button-secondary">Back to Invoices</a>
+        {% if invoice.status == 'posted' %}
+            <a href="/portal/payments?invoice_id={{ invoice.id }}" class="button button-primary">Pay Now</a>
+        {% endif %}
+    </div>
+</div>
+
+{% endblock %}

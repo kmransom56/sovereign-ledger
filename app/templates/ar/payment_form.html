@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}Record Payment - Sovereign Ledger{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">Record Payment</div>
+        <div class="card-subtitle">Allocate payment across outstanding invoices</div>
+    </div>
+
+    <form method="POST" action="/portal/payments" hx-post="/portal/payments" hx-target="body" hx-swap="outerHTML">
+        <div class="form-group">
+            <label for="payment_date">Payment Date *</label>
+            <input type="date" id="payment_date" name="payment_date" value="{{ today }}" required>
+        </div>
+
+        <div class="form-group">
+            <label for="amount_cents">Amount (USD) *</label>
+            <input type="number" id="amount_cents" name="amount_cents" step="0.01" min="0" placeholder="0.00" required hx-get="/portal/payments/preview" hx-trigger="change" hx-target="#preview">
+        </div>
+
+        <div class="form-group">
+            <label for="memo">Memo (Optional)</label>
+            <input type="text" id="memo" name="memo" placeholder="Check #, reference, etc.">
+        </div>
+
+        <div class="card" style="background: var(--gray-50); margin-bottom: 1.5rem;">
+            <div class="card-title" style="margin-bottom: 1rem;">Outstanding Invoices</div>
+
+            {% if outstanding_invoices %}
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 30px;"></th>
+                        <th>Invoice #</th>
+                        <th>Date</th>
+                        <th>Due Date</th>
+                        <th style="text-align: right;">Amount Due</th>
+                        <th style="text-align: right;">Allocate</th>
+                    </tr>
+                </thead>
+                <tbody id="invoices-list">
+                    {% for invoice in outstanding_invoices %}
+                    <tr>
+                        <td>
+                            <input type="hidden" name="invoice_ids" value="{{ invoice.id }}">
+                            <input type="checkbox" name="invoice_{{ invoice.id }}" value="{{ invoice.id }}" class="invoice-select">
+                        </td>
+                        <td><strong>#{{ invoice.invoice_number }}</strong></td>
+                        <td>{{ invoice.issue_date | format_date }}</td>
+                        <td>{{ invoice.due_date | format_date }}</td>
+                        <td class="amount">${{ (invoice.amount_cents / 100) | format_currency }}</td>
+                        <td class="amount">
+                            <input type="number" name="allocate_{{ invoice.id }}" step="0.01" min="0" max="{{ (invoice.amount_cents / 100) | float }}" placeholder="0.00" style="width: 100px;" class="allocation-input" hx-get="/portal/payments/preview" hx-trigger="change" hx-target="#preview">
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color: var(--gray-600);">No outstanding invoices to pay.</p>
+            {% endif %}
+        </div>
+
+        <div id="preview" class="card" style="background: var(--gray-50); margin-bottom: 1.5rem; display: none;">
+            <div class="card-title" style="margin-bottom: 1rem;">Payment Preview</div>
+            <div id="preview-content"></div>
+        </div>
+
+        <div class="button-group">
+            <button type="button" class="button button-secondary" onclick="window.history.back()">Cancel</button>
+            <button type="submit" class="button button-primary">Record Payment</button>
+        </div>
+    </form>
+</div>
+
+<script>
+    // Show preview when amount changes
+    const amountInput = document.getElementById('amount_cents');
+    const previewDiv = document.getElementById('preview');
+
+    amountInput.addEventListener('change', function() {
+        if (this.value > 0) {
+            previewDiv.style.display = 'block';
+        }
+    });
+
+    // Auto-allocate to invoices
+    document.querySelectorAll('.invoice-select').forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            const invoiceId = this.value;
+            const allocationInput = document.querySelector(`input[name="allocate_${invoiceId}"]`);
+            const invoiceRow = this.closest('tr');
+            const amountCell = invoiceRow.querySelector('.amount');
+
+            if (this.checked) {
+                const maxAmount = parseFloat(amountCell.textContent.replace('$', '').replace(',', ''));
+                allocationInput.value = maxAmount;
+                allocationInput.disabled = false;
+            } else {
+                allocationInput.value = '';
+                allocationInput.disabled = true;
+            }
+        });
+    });
+</script>
+
+{% endblock %}
