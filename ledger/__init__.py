@@ -17,7 +17,26 @@ The convention is encoded structurally: ``JournalLine.debit`` /
 side. Property tests in ``tests/test_engine.py`` pin it.
 """
 
+from ledger.capital_assets import (
+    AssetPool,
+    AssetType,
+    CapitalAsset,
+    DepreciationMethod,
+    DepreciationSchedule,
+    create_depreciation_schedule,
+)
 from ledger.customers import Customer, CustomerStatus, new_customer
+from ledger.deductions import (
+    DeductibleExpense,
+    DeductionCategory,
+    DeductionSummary,
+    HobbyLossAnalysis,
+    TaxBreakOpportunity,
+    aggregate_deductions_by_category,
+    aggregate_deductions_by_period,
+    detect_hobby_loss,
+    identify_tax_breaks,
+)
 from ledger.engine import PostedEntry, post, post_lines, validate_balanced
 from ledger.invoices import (
     Invoice,
@@ -44,6 +63,26 @@ from ledger.recurring import (
     mark_template_paused,
     new_template,
     should_generate_for_cycle,
+)
+from ledger.tax_projections import (
+    FilingStatus,
+    QuarterlyTaxEstimate,
+    TaxProjection,
+    TaxSavingsProjection,
+    calculate_federal_tax,
+    calculate_quarterly_estimate,
+    calculate_self_employment_tax,
+    project_year_end_tax,
+)
+from ledger.tax_recommendations import (
+    RecommendationPriority,
+    RecommendationType,
+    TaxRecommendation,
+    TaxRecommendationSet,
+    generate_compliance_recommendations,
+    generate_deduction_recommendations,
+    generate_optimization_recommendations,
+    prioritize_recommendations,
 )
 from ledger.types import (
     BIGINT_MAX_CENTS,
@@ -72,10 +111,27 @@ __all__ = [
     "post",
     "post_lines",
     "validate_balanced",
+    # Capital Assets (Step 13, Phase 1)
+    "AssetPool",
+    "AssetType",
+    "CapitalAsset",
+    "DepreciationMethod",
+    "DepreciationSchedule",
+    "create_depreciation_schedule",
     # Customers
     "Customer",
     "CustomerStatus",
     "new_customer",
+    # Deductions (Step 13, Phase 1)
+    "DeductibleExpense",
+    "DeductionCategory",
+    "DeductionSummary",
+    "HobbyLossAnalysis",
+    "TaxBreakOpportunity",
+    "aggregate_deductions_by_category",
+    "aggregate_deductions_by_period",
+    "detect_hobby_loss",
+    "identify_tax_breaks",
     # Invoices
     "Invoice",
     "InvoiceDraft",
@@ -99,4 +155,22 @@ __all__ = [
     "mark_template_paused",
     "new_template",
     "should_generate_for_cycle",
+    # Tax Projections (Step 13, Phase 1)
+    "FilingStatus",
+    "QuarterlyTaxEstimate",
+    "TaxProjection",
+    "TaxSavingsProjection",
+    "calculate_federal_tax",
+    "calculate_quarterly_estimate",
+    "calculate_self_employment_tax",
+    "project_year_end_tax",
+    # Tax Recommendations (Step 13, Phase 1)
+    "RecommendationPriority",
+    "RecommendationType",
+    "TaxRecommendation",
+    "TaxRecommendationSet",
+    "generate_compliance_recommendations",
+    "generate_deduction_recommendations",
+    "generate_optimization_recommendations",
+    "prioritize_recommendations",
 ]
