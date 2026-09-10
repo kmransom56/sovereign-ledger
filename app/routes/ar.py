@@ -41,8 +41,7 @@ from ledger.invoices import (
 )
 from ledger.payments import Payment, PaymentAllocationLine, allocate_payment
 
-if TYPE_CHECKING:
-    import psycopg
+import psycopg
 
 router = APIRouter(prefix="/ar", tags=["ar"])
 
@@ -93,7 +92,7 @@ def create_customer(
                 "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
                 (name, tax_id, email, address, notes, customer.status),
             )
-            customer_id = cur.fetchone()[0]
+            customer_id = cur.fetchone()["id"]
         conn.commit()
     except Exception as exc:
         conn.rollback()
@@ -131,11 +130,11 @@ def list_customers(
     return {
         "customers": [
             {
-                "id": row[0],
-                "name": row[1],
-                "tax_id": row[2],
-                "email": row[3],
-                "status": row[4],
+                "id": row["id"],
+                "name": row["name"],
+                "tax_id": row["tax_id"],
+                "email": row["email"],
+                "status": row["status"],
             }
             for row in rows
         ]
@@ -172,14 +171,14 @@ def get_customer(
 
     return {
         "customer": {
-            "id": row[0],
-            "name": row[1],
-            "tax_id": row[2],
-            "email": row[3],
-            "address": row[4],
-            "notes": row[5],
-            "status": row[6],
-            "created_at": row[7].isoformat() if row[7] else None,
+            "id": row["id"],
+            "name": row["name"],
+            "tax_id": row["tax_id"],
+            "email": row["email"],
+            "address": row["address"],
+            "notes": row["notes"],
+            "status": row["status"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         }
     }
 
@@ -390,13 +389,13 @@ def list_invoices(
     return {
         "invoices": [
             {
-                "id": row[0],
-                "invoice_number": row[1],
-                "customer_id": row[2],
-                "issue_date": row[3].isoformat(),
-                "due_date": row[4].isoformat(),
-                "total_cents": row[5],
-                "status": row[6],
+                "id": row["id"],
+                "invoice_number": row["invoice_number"],
+                "customer_id": row["customer_id"],
+                "issue_date": row["issue_date"].isoformat(),
+                "due_date": row["due_date"].isoformat(),
+                "total_cents": row["total_amount_cents"],
+                "status": row["status"],
             }
             for row in rows
         ]
@@ -460,49 +459,49 @@ def get_invoice(
     taxes_by_line = {}
     total_tax_cents = 0
     for tax_row in tax_rows:
-        line_id = tax_row[0]
+        line_id = tax_row["invoice_line_id"]
         if line_id not in taxes_by_line:
             taxes_by_line[line_id] = []
         taxes_by_line[line_id].append({
-            "jurisdiction": tax_row[1],
-            "jurisdiction_name": tax_row[2],
-            "rate_percent": float(tax_row[3]),
-            "taxable_amount_cents": tax_row[4],
-            "tax_amount_cents": tax_row[5],
+            "jurisdiction": tax_row["code"],
+            "jurisdiction_name": tax_row["name"],
+            "rate_percent": float(tax_row["rate_percent"]),
+            "taxable_amount_cents": tax_row["taxable_amount_cents"],
+            "tax_amount_cents": tax_row["tax_amount_cents"],
         })
-        total_tax_cents += tax_row[5]
+        total_tax_cents += tax_row["tax_amount_cents"]
 
     # Build line items with tax details
     lines = []
     for lr in line_rows:
-        line_id = lr[0]
+        line_id = lr["id"]
         line_taxes = taxes_by_line.get(line_id, [])
         line_tax_total = sum(t["tax_amount_cents"] for t in line_taxes)
 
         lines.append({
             "id": line_id,
-            "account_id": lr[1],
-            "description": lr[2],
-            "quantity": lr[3],
-            "unit_price_cents": lr[4],
-            "amount_cents": lr[5],
+            "account_id": lr["account_id"],
+            "description": lr["description"],
+            "quantity": lr["quantity"],
+            "unit_price_cents": lr["unit_price_cents"],
+            "amount_cents": lr["amount_cents"],
             "taxes": line_taxes,
             "tax_total_cents": line_tax_total,
-            "total_with_tax_cents": lr[5] + line_tax_total,
+            "total_with_tax_cents": lr["amount_cents"] + line_tax_total,
         })
 
     return {
         "invoice": {
-            "id": row[0],
-            "invoice_number": row[1],
-            "customer_id": row[2],
-            "issue_date": row[3].isoformat(),
-            "due_date": row[4].isoformat(),
-            "memo": row[5],
-            "subtotal_cents": row[6] - total_tax_cents,
+            "id": row["id"],
+            "invoice_number": row["invoice_number"],
+            "customer_id": row["customer_id"],
+            "issue_date": row["issue_date"].isoformat(),
+            "due_date": row["due_date"].isoformat(),
+            "memo": row["memo"],
+            "subtotal_cents": row["total_amount_cents"] - total_tax_cents,
             "total_tax_cents": total_tax_cents,
-            "total_cents": row[6],
-            "status": row[7],
+            "total_cents": row["total_amount_cents"],
+            "status": row["status"],
             "lines": lines,
         }
     }
@@ -654,11 +653,11 @@ def list_payments(
     return {
         "payments": [
             {
-                "id": row[0],
-                "customer_id": row[1],
-                "payment_date": row[2].isoformat(),
-                "amount_cents": row[3],
-                "memo": row[4],
+                "id": row["id"],
+                "customer_id": row["customer_id"],
+                "payment_date": row["payment_date"].isoformat(),
+                "amount_cents": row["amount_cents"],
+                "memo": row["memo"],
             }
             for row in rows
         ]
@@ -717,7 +716,7 @@ def create_recurring_template(
                     line_account_id,
                 ),
             )
-            template_id = cur.fetchone()[0]
+            template_id = cur.fetchone()["id"]
         conn.commit()
     except Exception as exc:
         conn.rollback()
@@ -763,12 +762,12 @@ def list_recurring_templates(
     return {
         "templates": [
             {
-                "id": row[0],
-                "customer_id": row[1],
-                "name": row[2],
-                "amount_cents": row[3],
-                "status": row[4],
-                "active_from": row[5].isoformat() if row[5] else None,
+                "id": row["id"],
+                "customer_id": row["customer_id"],
+                "name": row["name"],
+                "amount_cents": row["amount_cents"],
+                "status": row["status"],
+                "active_from": row["active_from"].isoformat() if row["active_from"] else None,
             }
             for row in rows
         ]
@@ -907,17 +906,17 @@ def preview_recurring_generation(
             )
 
         template = RecurringTemplate(
-            id=row[0],
-            customer_id=row[1],
-            name=row[2],
-            description=row[3],
-            amount_cents=row[4],
-            due_days_offset=row[5],
-            status=row[6],
-            active_from=row[7],
-            active_until=row[8],
-            line_account_id=row[9],
-            created_at=row[10],
+            id=row["id"],
+            customer_id=row["customer_id"],
+            name=row["name"],
+            description=row["description"],
+            amount_cents=row["amount_cents"],
+            due_days_offset=row["due_days_offset"],
+            status=row["status"],
+            active_from=row["active_from"],
+            active_until=row["active_until"],
+            line_account_id=row["line_account_id"],
+            created_at=row["created_at"],
         )
 
         # Generate draft
@@ -992,7 +991,7 @@ def update_invoice_status(
                     detail=f"Invoice {invoice_id} not found",
                 )
 
-            old_status = row[0]
+            old_status = row["status"]
 
             # Update status
             cur.execute(
@@ -1059,18 +1058,18 @@ def report_ar_aging(
         ninety_plus = []
 
         for row in rows:
-            inv_id, inv_num, cust_name, issue_date, due_date, amount_cents, inv_status, days_over = row
             entry = {
-                "invoice_id": inv_id,
-                "invoice_number": inv_num,
-                "customer_name": cust_name,
-                "issue_date": issue_date.isoformat() if issue_date else None,
-                "due_date": due_date.isoformat() if due_date else None,
-                "amount_cents": amount_cents,
-                "status": inv_status,
-                "days_overdue": days_over or 0,
+                "invoice_id": row["id"],
+                "invoice_number": row["invoice_number"],
+                "customer_name": row["customer_name"],
+                "issue_date": row["issue_date"].isoformat() if row["issue_date"] else None,
+                "due_date": row["due_date"].isoformat() if row["due_date"] else None,
+                "amount_cents": row["total_amount_cents"],
+                "status": row["status"],
+                "days_overdue": row["days_overdue"] or 0,
             }
 
+            days_over = row["days_overdue"]
             if days_over is None or days_over <= 0:
                 current.append(entry)
             elif days_over <= 30:
@@ -1147,7 +1146,11 @@ def report_customer_statement(
                     detail=f"Customer {customer_id} not found",
                 )
 
-            cust_id, cust_name, cust_tax_id, cust_email, cust_status = customer_row
+            cust_id = customer_row["id"]
+            cust_name = customer_row["name"]
+            cust_tax_id = customer_row["tax_id"]
+            cust_email = customer_row["email"]
+            cust_status = customer_row["status"]
 
             # Fetch invoices
             query = (
@@ -1186,23 +1189,23 @@ def report_customer_statement(
         # Assemble response
         invoices = [
             {
-                "id": row[0],
-                "invoice_number": row[1],
-                "issue_date": row[2].isoformat() if row[2] else None,
-                "due_date": row[3].isoformat() if row[3] else None,
-                "amount_cents": row[4],
-                "status": row[5],
+                "id": row["id"],
+                "invoice_number": row["invoice_number"],
+                "issue_date": row["issue_date"].isoformat() if row["issue_date"] else None,
+                "due_date": row["due_date"].isoformat() if row["due_date"] else None,
+                "amount_cents": row["total_amount_cents"],
+                "status": row["status"],
             }
             for row in invoice_rows
         ]
 
         payments = [
             {
-                "id": row[0],
-                "payment_date": row[1].isoformat() if row[1] else None,
-                "amount_cents": row[2],
-                "memo": row[3],
-                "status": row[4],
+                "id": row["id"],
+                "payment_date": row["payment_date"].isoformat() if row["payment_date"] else None,
+                "amount_cents": row["amount_cents"],
+                "memo": row["memo"],
+                "status": row["status"],
             }
             for row in payment_rows
         ]
@@ -1271,13 +1274,13 @@ def report_overdue_invoices(
 
         overdue_invoices = [
             {
-                "invoice_id": row[0],
-                "invoice_number": row[1],
-                "customer_name": row[2],
-                "due_date": row[3].isoformat() if row[3] else None,
-                "amount_cents": row[4],
-                "status": row[5],
-                "days_overdue": row[6] or 0,
+                "invoice_id": row["id"],
+                "invoice_number": row["invoice_number"],
+                "customer_name": row["customer_name"],
+                "due_date": row["due_date"].isoformat() if row["due_date"] else None,
+                "amount_cents": row["total_amount_cents"],
+                "status": row["status"],
+                "days_overdue": row["days_overdue"] or 0,
             }
             for row in rows
         ]

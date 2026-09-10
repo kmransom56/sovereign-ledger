@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from datetime import date
 
+import psycopg
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.dependencies import require_admin, current_user
@@ -21,25 +23,25 @@ def list_entries(request: Request, user: dict = Depends(current_user)) -> dict:
     """List all journal entries with their lines."""
     conn = request.app.state.db
     entries = load_journal_entries(conn)
-    return {
-        "entries": [
-            {
-                "entry_id": e.entry_id,
-                "date": e.date.isoformat(),
-                "description": e.description,
-                "lines": [
-                    {
-                        "account": line.account.name,
-                        "code": line.account.code,
-                        "amount_cents": line.amount_cents,
-                        "side": "debit" if line.amount_cents > 0 else "credit",
-                    }
-                    for line in e.lines
-                ],
-            }
-            for e in entries
-        ]
-    }
+    # Transform raw dict entries into the API response format expected by the client/tests.
+    formatted_entries = []
+    for entry in entries:
+        formatted_entry = {
+            "entry_id": entry.get("id"),
+            "date": entry.get("entry_date").isoformat() if entry.get("entry_date") else None,
+            "description": entry.get("description"),
+            "lines": [
+                {
+                    "account": line.get("account_name"),
+                    "code": line.get("account_code"),
+                    "amount_cents": line.get("amount_cents"),
+                    "side": "debit" if line.get("amount_cents", 0) > 0 else "credit",
+                }
+                for line in entry.get("lines", [])
+            ],
+        }
+        formatted_entries.append(formatted_entry)
+    return {"entries": formatted_entries}
 
 
 @router.post("")
@@ -135,15 +137,16 @@ def post_entry(
         )
 
     # Persist to DB.
-    period = find_period_for_date(conn, entry_date)
-    if period is None:
+    period_result = find_period_for_date(conn, entry_date)
+    if period_result is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"no fiscal period covers {entry_date.isoformat()}",
         )
+    period, period_db_id = period_result[1], period_result[0]
 
     # Look up the period's DB id.
-    with conn.cursor() as cur:
+    with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
         cur.execute("SELECT id FROM fiscal_periods WHERE name = %s", (period.name,))
         row = cur.fetchone()
         if row is None:
@@ -151,7 +154,7 @@ def post_entry(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"fiscal period {period.name!r} exists in core but not in DB",
             )
-        period_db_id = row[0]
+        period_db_id = row["id"]
 
     try:
         entry_db_id = insert_journal_entry(conn, posted.entry, period_db_id)

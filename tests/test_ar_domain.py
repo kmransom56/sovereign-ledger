@@ -103,6 +103,9 @@ class TestCustomerDomain:
     @given(st.text(min_size=1))
     def test_customer_whitespace_stripped(self, name: str) -> None:
         """Customer names are stripped of leading/trailing whitespace."""
+        # Skip cases where stripping yields an empty name (would raise InvalidCustomerError).
+        from hypothesis import assume
+        assume(name.strip())
         padded = f"  {name}  "
         c = new_customer(name=padded)
         assert c.name == name.strip()

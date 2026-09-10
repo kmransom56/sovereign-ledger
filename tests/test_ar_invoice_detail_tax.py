@@ -23,15 +23,16 @@ class TestInvoiceDetailWithTax:
         mock_cursor = MagicMock()
 
         # Invoice header
-        mock_cursor.fetchone.return_value = (
-            1, "INV-001", 2, date(2026, 9, 1), date(2026, 10, 1),
-            "Services rendered", 5000, "posted"
-        )
+        mock_cursor.fetchone.return_value = {
+            "id": 1, "invoice_number": "INV-001", "customer_id": 2,
+            "issue_date": date(2026, 9, 1), "due_date": date(2026, 10, 1),
+            "memo": "Services rendered", "total_amount_cents": 5000, "status": "posted",
+        }
 
         # Line items
         mock_cursor.fetchall.side_effect = [
             [
-                (101, 1000, "Service A", 1, 5000, 5000),
+                {"id": 101, "account_id": 1000, "description": "Service A", "quantity": 1, "unit_price_cents": 5000, "amount_cents": 5000},
             ],
             [],  # No taxes
         ]
@@ -61,19 +62,20 @@ class TestInvoiceDetailWithTax:
         mock_cursor = MagicMock()
 
         # Invoice header: $50.00 total
-        mock_cursor.fetchone.return_value = (
-            1, "INV-001", 2, date(2026, 9, 1), date(2026, 10, 1),
-            "Services", 5425, "posted"
-        )
+        mock_cursor.fetchone.return_value = {
+            "id": 1, "invoice_number": "INV-001", "customer_id": 2,
+            "issue_date": date(2026, 9, 1), "due_date": date(2026, 10, 1),
+            "memo": "Services", "total_amount_cents": 5425, "status": "posted",
+        }
 
         # Line items: $50.00 subtotal
         mock_cursor.fetchall.side_effect = [
             [
-                (101, 1000, "Service A", 1, 5000, 5000),
+                {"id": 101, "account_id": 1000, "description": "Service A", "quantity": 1, "unit_price_cents": 5000, "amount_cents": 5000},
             ],
             [
                 # Tax: CA 8.5%, $50 * 0.085 = $4.25 (425 cents)
-                (101, "CA", "California", 8.500, 5000, 425),
+                {"invoice_line_id": 101, "code": "CA", "name": "California", "rate_percent": 8.500, "taxable_amount_cents": 5000, "tax_amount_cents": 425},
             ],
         ]
 
@@ -104,21 +106,22 @@ class TestInvoiceDetailWithTax:
         mock_cursor = MagicMock()
 
         # Invoice: $100.00 + $8.50 (CA sales) + $2.50 (local) = $111.00
-        mock_cursor.fetchone.return_value = (
-            1, "INV-001", 2, date(2026, 9, 1), date(2026, 10, 1),
-            "Services", 11100, "posted"
-        )
+        mock_cursor.fetchone.return_value = {
+            "id": 1, "invoice_number": "INV-001", "customer_id": 2,
+            "issue_date": date(2026, 9, 1), "due_date": date(2026, 10, 1),
+            "memo": "Services", "total_amount_cents": 11100, "status": "posted",
+        }
 
         # Line items
         mock_cursor.fetchall.side_effect = [
             [
-                (101, 1000, "Service", 1, 10000, 10000),
+                {"id": 101, "account_id": 1000, "description": "Service", "quantity": 1, "unit_price_cents": 10000, "amount_cents": 10000},
             ],
             [
                 # CA sales tax: 8.5%
-                (101, "CA", "California", 8.500, 10000, 850),
+                {"invoice_line_id": 101, "code": "CA", "name": "California", "rate_percent": 8.500, "taxable_amount_cents": 10000, "tax_amount_cents": 850},
                 # Local tax: 2.5%
-                (101, "LOCAL", "Local Tax", 2.500, 10000, 250),
+                {"invoice_line_id": 101, "code": "LOCAL", "name": "Local Tax", "rate_percent": 2.500, "taxable_amount_cents": 10000, "tax_amount_cents": 250},
             ],
         ]
 
@@ -149,20 +152,21 @@ class TestInvoiceDetailWithTax:
         # Line 1 (taxable): $30 + $2.55 CA tax
         # Line 2 (exempt): $20 + $0 tax
         # Total: $52.55
-        mock_cursor.fetchone.return_value = (
-            1, "INV-002", 2, date(2026, 9, 1), date(2026, 10, 1),
-            "Mixed items", 5255, "posted"
-        )
+        mock_cursor.fetchone.return_value = {
+            "id": 1, "invoice_number": "INV-002", "customer_id": 2,
+            "issue_date": date(2026, 9, 1), "due_date": date(2026, 10, 1),
+            "memo": "Mixed items", "total_amount_cents": 5255, "status": "posted",
+        }
 
         # Line items
         mock_cursor.fetchall.side_effect = [
             [
-                (101, 1000, "Taxable Service", 1, 3000, 3000),
-                (102, 1000, "Exempt Service", 1, 2000, 2000),
+                {"id": 101, "account_id": 1000, "description": "Taxable Service", "quantity": 1, "unit_price_cents": 3000, "amount_cents": 3000},
+                {"id": 102, "account_id": 1000, "description": "Exempt Service", "quantity": 1, "unit_price_cents": 2000, "amount_cents": 2000},
             ],
             [
                 # Only line 101 has tax
-                (101, "CA", "California", 8.500, 3000, 255),
+                {"invoice_line_id": 101, "code": "CA", "name": "California", "rate_percent": 8.500, "taxable_amount_cents": 3000, "tax_amount_cents": 255},
             ],
         ]
 
@@ -198,19 +202,20 @@ class TestInvoiceDetailWithTax:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
 
-        mock_cursor.fetchone.return_value = (
-            1, "INV-001", 2, date(2026, 9, 1), date(2026, 10, 1),
-            "Resale", 5000, "posted"
-        )
+        mock_cursor.fetchone.return_value = {
+            "id": 1, "invoice_number": "INV-001", "customer_id": 2,
+            "issue_date": date(2026, 9, 1), "due_date": date(2026, 10, 1),
+            "memo": "Resale", "total_amount_cents": 5000, "status": "posted",
+        }
 
         # Line items
         mock_cursor.fetchall.side_effect = [
             [
-                (101, 1000, "Merchandise", 1, 5000, 5000),
+                {"id": 101, "account_id": 1000, "description": "Merchandise", "quantity": 1, "unit_price_cents": 5000, "amount_cents": 5000},
             ],
             [
                 # Tax amount is 0 but details show it was evaluated
-                (101, "CA", "California", 8.500, 5000, 0),
+                {"invoice_line_id": 101, "code": "CA", "name": "California", "rate_percent": 8.500, "taxable_amount_cents": 5000, "tax_amount_cents": 0},
             ],
         ]
 

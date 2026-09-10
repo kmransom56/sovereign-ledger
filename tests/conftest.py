@@ -32,7 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-CONTAINER = "sovereign-ledger-test-pg"
+CONTAINER = "sl-test-pg"
 IMAGE = "docker.io/library/postgres:16-alpine"
 HOST_PORT = 11241
 TEST_DSN = f"postgresql://ledger:ledger@127.0.0.1:{HOST_PORT}/ledger_test"
@@ -118,24 +118,31 @@ def scratch_pg() -> str:
     Session-scoped so the whole test suite pays podman startup + migration
     cost exactly once. Teardown removes the container even on failure.
     """
-    _assert_port_free()
-    # A container from a previously crashed session would collide by name.
-    _podman("rm", "-f", CONTAINER, check=False)
+    # Check if the test container is already running (persistent mode).
+    # If so, skip _assert_port_free (which would kill it) and reuse it.
+    ps = _podman("ps", "--filter", f"name={CONTAINER}", "--format", "{{.Names}}", check=False)
+    if CONTAINER not in (ps.stdout or "").strip():
+        _assert_port_free()
+        _podman("rm", "-f", CONTAINER, check=False)
+        _podman(
+            "run", "-d",
+            "--name", CONTAINER,
+            "-p", f"127.0.0.1:{HOST_PORT}:5432",
+            "-e", "POSTGRES_USER=ledger",
+            "-e", "POSTGRES_PASSWORD=ledger",
+            "-e", "POSTGRES_DB=ledger",
+            IMAGE,
+        )
 
-    _podman(
-        "run", "--rm", "-d",
-        "--name", CONTAINER,
-        "-p", f"127.0.0.1:{HOST_PORT}:5432",
-        "-e", "POSTGRES_USER=ledger",
-        "-e", "POSTGRES_PASSWORD=ledger",
-        "-e", "POSTGRES_DB=ledger",
-        IMAGE,
-    )
     try:
         _wait_ready()
 
-        # Fresh scratch database per session; CREATE DATABASE cannot run in a
-        # transaction block, hence via psql -c.
+        # Drop any stale scratch database from a previous session, then create fresh.
+        _podman(
+            "exec", CONTAINER, "psql", "-U", "ledger", "-d", "ledger",
+            "-c", "DROP DATABASE IF EXISTS ledger_test",
+            check=False,
+        )
         _podman(
             "exec", CONTAINER, "psql", "-U", "ledger", "-d", "ledger",
             "-c", "CREATE DATABASE ledger_test",
@@ -150,4 +157,5 @@ def scratch_pg() -> str:
 
         yield TEST_DSN
     finally:
-        _podman("rm", "-f", CONTAINER, check=False)
+        # Keep the container running for re-use across test sessions.
+        pass

@@ -59,11 +59,11 @@ def review_progress(request: Request, user: dict = Depends(current_user)) -> dic
     """Counts of pending/accepted/rejected bank lines."""
     import psycopg
     conn = request.app.state.db
-    with conn.cursor() as cur:
+    with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
         cur.execute(
             "SELECT status, count(*) FROM bank_lines GROUP BY status"
         )
-        counts = {row[0]: row[1] for row in cur.fetchall()}
+        counts = {row["status"]: row["count"] for row in cur.fetchall()}
     return {
         "pending": counts.get("pending", 0),
         "accepted": counts.get("accepted", 0),
@@ -158,13 +158,14 @@ def accept_line(
         posted = post_draft(draft, periods, catalog)
 
         # 3. Persist the journal entry.
-        period = find_period_for_date(conn, line["transaction_date"])
-        if period is None:
+        period_result = find_period_for_date(conn, line["transaction_date"])
+        if period_result is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"no fiscal period covers {line['transaction_date'].isoformat()}",
             )
-        with conn.cursor() as cur:
+        period, period_db_id = period_result[1], period_result[0]
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute("SELECT id FROM fiscal_periods WHERE name = %s", (period.name,))
             row = cur.fetchone()
             if row is None:
@@ -172,7 +173,7 @@ def accept_line(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"fiscal period {period.name!r} not in DB",
                 )
-            period_db_id = row[0]
+            period_db_id = row["id"]
 
         entry_db_id = insert_journal_entry(conn, posted.entry, period_db_id)
 

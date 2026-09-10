@@ -75,7 +75,7 @@ def test_create_customer_success(client, mock_db):
     """Create a new customer with valid data."""
     with patch.object(client.app.state, "db", mock_db):
         mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = (1,)  # customer_id
+        mock_cursor.fetchone.return_value = {"id": 1}  # customer_id
         mock_db.cursor.return_value.__enter__.return_value = mock_cursor
 
         response = client.post(
@@ -113,8 +113,8 @@ def test_list_customers(client, mock_db):
     with patch.object(client.app.state, "db", mock_db):
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = [
-            (1, "Acme Corp", "12-3456789", "active", "2026-01-01"),
-            (2, "Beta Inc", "12-3456790", "active", "2026-02-01"),
+            {"id": 1, "name": "Acme Corp", "tax_id": "12-3456789", "email": None, "status": "active"},
+            {"id": 2, "name": "Beta Inc", "tax_id": "12-3456790", "email": None, "status": "active"},
         ]
         mock_db.cursor.return_value.__enter__.return_value = mock_cursor
 
@@ -130,12 +130,12 @@ def test_list_customers(client, mock_db):
 
 def test_update_customer_status(client, mock_db):
     """Update customer status (requires admin)."""
-    with patch("app.routes.ar.require_admin") as mock_admin:
-        mock_admin.return_value = {"id": "admin_user", "role": "admin"}
+    from app.dependencies import require_admin
+    client.app.dependency_overrides[require_admin] = lambda: {"id": "admin_user", "role": "admin"}
 
     with patch.object(client.app.state, "db", mock_db):
         mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = (1, "Acme Corp")
+        mock_cursor.fetchone.return_value = {"id": 1, "name": "Acme Corp"}
         mock_db.cursor.return_value.__enter__.return_value = mock_cursor
 
         response = client.patch(
@@ -146,6 +146,7 @@ def test_update_customer_status(client, mock_db):
 
         assert response.status_code == 200
         assert response.json()["new_status"] == "inactive"
+    client.app.dependency_overrides.pop(require_admin, None)
 
 
 # ============================================================================
@@ -198,7 +199,14 @@ def test_create_invoice_invalid_date(client, mock_db):
                 "due_date": "2026-10-01",
                 "fiscal_period_id": 1,
                 "ar_account_id": 100,
-                "lines": [],
+                "lines": [
+                    {
+                        "account_id": 200,
+                        "description": "Service",
+                        "quantity": 1,
+                        "unit_price_cents": 10000,
+                    }
+                ],
             },
             headers={"Authorization": "Bearer test_token"},
         )
@@ -209,12 +217,12 @@ def test_create_invoice_invalid_date(client, mock_db):
 
 def test_update_invoice_status(client, mock_db):
     """Update invoice status (mark paid/void)."""
-    with patch("app.routes.ar.require_admin") as mock_admin:
-        mock_admin.return_value = {"id": "admin_user"}
+    from app.dependencies import require_admin
+    client.app.dependency_overrides[require_admin] = lambda: {"id": "admin_user", "role": "admin"}
 
     with patch.object(client.app.state, "db", mock_db):
         mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = ("posted",)  # old status
+        mock_cursor.fetchone.return_value = {"status": "posted"}  # old status
         mock_db.cursor.return_value.__enter__.return_value = mock_cursor
 
         response = client.patch(
@@ -225,6 +233,7 @@ def test_update_invoice_status(client, mock_db):
 
         assert response.status_code == 200
         assert response.json()["new_status"] == "paid"
+    client.app.dependency_overrides.pop(require_admin, None)
 
 
 # ============================================================================
@@ -248,7 +257,7 @@ def test_record_payment_success(client, mock_db):
                         "payment_date": "2026-09-15",
                         "amount_cents": 50000,
                         "memo": "Check #1234",
-                        "invoices": [(1, 30000), (2, 20000)],
+                        "invoices": [{"invoice_id": 1, "amount_due_cents": 30000}, {"invoice_id": 2, "amount_due_cents": 20000}],
                         "bank_account_id": 300,
                         "ar_account_id": 100,
                         "customer_credits_account_id": 400,
@@ -276,7 +285,7 @@ def test_record_payment_overpayment(client, mock_db):
                         "customer_id": 1,
                         "payment_date": "2026-09-15",
                         "amount_cents": 60000,  # More than invoices owe
-                        "invoices": [(1, 50000)],  # Only owes 50000
+                        "invoices": [{"invoice_id": 1, "amount_due_cents": 50000}],  # Only owes 50000
                         "bank_account_id": 300,
                         "ar_account_id": 100,
                         "customer_credits_account_id": 400,
@@ -295,9 +304,12 @@ def test_record_payment_overpayment(client, mock_db):
 
 def test_create_recurring_template(client, mock_db):
     """Create a new recurring template."""
+    from app.dependencies import require_admin
+    client.app.dependency_overrides[require_admin] = lambda: {"id": "admin_user", "role": "admin"}
+
     with patch.object(client.app.state, "db", mock_db):
         mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = (789,)  # template_id
+        mock_cursor.fetchone.return_value = {"id": 789}  # template_id
         mock_db.cursor.return_value.__enter__.return_value = mock_cursor
 
         response = client.post(
@@ -311,21 +323,22 @@ def test_create_recurring_template(client, mock_db):
                 "line_account_id": 200,
                 "active_from": "2026-09-01",
             },
-            headers={"Authorization": "Bearer test_token"},
+            headers={"Authorization": "Bearer admin_token"},
         )
 
         assert response.status_code == 201
         assert response.json()["template_id"] == 789
+    client.app.dependency_overrides.pop(require_admin, None)
 
 
 def test_update_template_status(client, mock_db):
     """Update template status (pause/resume/end)."""
-    with patch("app.routes.ar.require_admin") as mock_admin:
-        mock_admin.return_value = {"id": "admin_user"}
+    from app.dependencies import require_admin
+    client.app.dependency_overrides[require_admin] = lambda: {"id": "admin_user", "role": "admin"}
 
     with patch.object(client.app.state, "db", mock_db):
         mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = (789,)
+        mock_cursor.fetchone.return_value = {"id": 789}
         mock_db.cursor.return_value.__enter__.return_value = mock_cursor
 
         response = client.patch(
@@ -336,16 +349,17 @@ def test_update_template_status(client, mock_db):
 
         assert response.status_code == 200
         assert response.json()["new_status"] == "paused"
+    client.app.dependency_overrides.pop(require_admin, None)
 
 
 def test_update_template_price(client, mock_db):
     """Update template amount (cents)."""
-    with patch("app.routes.ar.require_admin") as mock_admin:
-        mock_admin.return_value = {"id": "admin_user"}
+    from app.dependencies import require_admin
+    client.app.dependency_overrides[require_admin] = lambda: {"id": "admin_user", "role": "admin"}
 
     with patch.object(client.app.state, "db", mock_db):
         mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = (789,)
+        mock_cursor.fetchone.return_value = {"id": 789}
         mock_db.cursor.return_value.__enter__.return_value = mock_cursor
 
         response = client.patch(
@@ -356,6 +370,7 @@ def test_update_template_price(client, mock_db):
 
         assert response.status_code == 200
         assert response.json()["new_amount_cents"] == 30000
+    client.app.dependency_overrides.pop(require_admin, None)
 
 
 def test_preview_recurring_generation(client, mock_db):
@@ -365,14 +380,16 @@ def test_preview_recurring_generation(client, mock_db):
         from ledger.invoices import InvoiceDraft, InvoiceLine
 
         mock_cursor = MagicMock()
-        mock_template_row = (
-            789, 1, "Monthly", "Description", 25000, 30, "active",
-            date(2026, 9, 1), None, 200, date(2026, 9, 1)
-        )
+        mock_template_row = {
+            "id": 789, "customer_id": 1, "name": "Monthly", "description": "Description",
+            "amount_cents": 25000, "due_days_offset": 30, "status": "active",
+            "active_from": date(2026, 9, 1), "active_until": None,
+            "line_account_id": 200, "created_at": date(2026, 9, 1),
+        }
         mock_cursor.fetchone.return_value = mock_template_row
         mock_db.cursor.return_value.__enter__.return_value = mock_cursor
 
-        with patch("app.routes.ar.generate_invoice_for_cycle") as mock_gen:
+        with patch("ledger.recurring.generate_invoice_for_cycle") as mock_gen:
             draft = InvoiceDraft(
                 customer_id=1,
                 issue_date=date(2026, 9, 1),
@@ -381,6 +398,8 @@ def test_preview_recurring_generation(client, mock_db):
                 memo="Monthly",
                 lines=(
                     InvoiceLine(
+                        id=None,
+                        invoice_id=None,
                         account_id=200,
                         description="Service",
                         quantity=1,
@@ -389,7 +408,7 @@ def test_preview_recurring_generation(client, mock_db):
                     ),
                 ),
             )
-            mock_gen.return_value = GenerationResult(invoice_draft=draft, error=None)
+            mock_gen.return_value = GenerationResult(template_id=789, cycle_date=date(2026, 9, 1), invoice_draft=draft, error=None)
 
             response = client.post(
                 "/ar/recurring-templates/789/preview",
@@ -414,9 +433,9 @@ def test_ar_aging_report(client, mock_db):
         mock_cursor = MagicMock()
         today = date.today()
         mock_cursor.fetchall.return_value = [
-            (1, 1001, "Acme Corp", today, today + timedelta(days=10), 50000, "posted", -10),  # current
-            (2, 1002, "Beta Inc", today - timedelta(days=40), today - timedelta(days=10), 30000, "posted", 10),  # 30 days
-            (3, 1003, "Gamma Ltd", today - timedelta(days=90), today - timedelta(days=60), 70000, "posted", 60),  # 90+ days
+            {"id": 1, "invoice_number": 1001, "customer_name": "Acme Corp", "issue_date": today, "due_date": today + timedelta(days=10), "total_amount_cents": 50000, "status": "posted", "days_overdue": -10},
+            {"id": 2, "invoice_number": 1002, "customer_name": "Beta Inc", "issue_date": today - timedelta(days=40), "due_date": today - timedelta(days=10), "total_amount_cents": 30000, "status": "posted", "days_overdue": 10},
+            {"id": 3, "invoice_number": 1003, "customer_name": "Gamma Ltd", "issue_date": today - timedelta(days=120), "due_date": today - timedelta(days=90), "total_amount_cents": 70000, "status": "posted", "days_overdue": 90},
         ]
         mock_db.cursor.return_value.__enter__.return_value = mock_cursor
 
@@ -437,11 +456,11 @@ def test_customer_statement(client, mock_db):
     with patch.object(client.app.state, "db", mock_db):
         mock_cursor = MagicMock()
         mock_cursor.fetchone.side_effect = [
-            (1, "Acme Corp", "12-3456789", "contact@acme.com", "active"),  # customer
+            {"id": 1, "name": "Acme Corp", "tax_id": "12-3456789", "email": "contact@acme.com", "status": "active"},
         ]
         mock_cursor.fetchall.side_effect = [
-            [(1, 1001, date(2026, 9, 1), date(2026, 10, 1), 50000, "posted")],  # invoices
-            [(1, date(2026, 9, 15), 50000, "Check #1234", "recorded")],  # payments
+            [{"id": 1, "invoice_number": 1001, "issue_date": date(2026, 9, 1), "due_date": date(2026, 10, 1), "total_amount_cents": 50000, "status": "posted"}],
+            [{"id": 1, "payment_date": date(2026, 9, 15), "amount_cents": 50000, "memo": "Check #1234", "status": "recorded"}],
         ]
         mock_db.cursor.return_value.__enter__.return_value = mock_cursor
 
@@ -465,8 +484,8 @@ def test_overdue_invoices_report(client, mock_db):
         mock_cursor = MagicMock()
         today = date.today()
         mock_cursor.fetchall.return_value = [
-            (1, 1001, "Acme Corp", today - timedelta(days=30), 50000, "posted", 30),
-            (2, 1002, "Beta Inc", today - timedelta(days=60), 30000, "posted", 60),
+            {"id": 1, "invoice_number": 1001, "customer_name": "Acme Corp", "due_date": today - timedelta(days=30), "total_amount_cents": 50000, "status": "posted", "days_overdue": 30},
+            {"id": 2, "invoice_number": 1002, "customer_name": "Beta Inc", "due_date": today - timedelta(days=60), "total_amount_cents": 30000, "status": "posted", "days_overdue": 60},
         ]
         mock_db.cursor.return_value.__enter__.return_value = mock_cursor
 
@@ -505,12 +524,19 @@ def test_fiscal_period_closed_error(client, mock_db):
                         "due_date": "2026-10-01",
                         "fiscal_period_id": 1,
                         "ar_account_id": 100,
-                        "lines": [],
+                        "lines": [
+                            {
+                                "account_id": 200,
+                                "description": "Service",
+                                "quantity": 1,
+                                "unit_price_cents": 10000,
+                            }
+                        ],
                     },
                     headers={"Authorization": "Bearer test_token"},
                 )
 
-                assert response.status_code == 400
+                assert response.status_code == 422
 
 
 def test_customer_inactive_error(client, mock_db):
@@ -532,12 +558,19 @@ def test_customer_inactive_error(client, mock_db):
                         "due_date": "2026-10-01",
                         "fiscal_period_id": 1,
                         "ar_account_id": 100,
-                        "lines": [],
+                        "lines": [
+                            {
+                                "account_id": 200,
+                                "description": "Service",
+                                "quantity": 1,
+                                "unit_price_cents": 10000,
+                            }
+                        ],
                     },
                     headers={"Authorization": "Bearer test_token"},
                 )
 
-                assert response.status_code == 400
+                assert response.status_code == 422
 
 
 def test_account_not_found_error(client, mock_db):
@@ -559,9 +592,16 @@ def test_account_not_found_error(client, mock_db):
                         "due_date": "2026-10-01",
                         "fiscal_period_id": 1,
                         "ar_account_id": 100,
-                        "lines": [],
+                        "lines": [
+                            {
+                                "account_id": 200,
+                                "description": "Service",
+                                "quantity": 1,
+                                "unit_price_cents": 10000,
+                            }
+                        ],
                     },
                     headers={"Authorization": "Bearer test_token"},
                 )
 
-                assert response.status_code == 400
+                assert response.status_code == 422

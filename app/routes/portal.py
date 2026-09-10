@@ -21,8 +21,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from app.dependencies import current_user
 from ledger.payments import allocate_payment
 
-if TYPE_CHECKING:
-    import psycopg
+import psycopg
 
 # Setup Jinja2 environment
 from pathlib import Path
@@ -33,6 +32,9 @@ jinja_env = Environment(
     autoescape=select_autoescape(["html", "xml"]),
     enable_async=False,
 )
+
+# Flask-compatible globals (FastAPI has no flash messaging)
+jinja_env.globals["get_flashed_messages"] = lambda with_categories=False, **_: ([] if not with_categories else [])
 
 # Register custom filters
 def format_date(d: date | None) -> str:
@@ -98,7 +100,8 @@ def dashboard(
                 , (customer_id,)
             )
             invoice_row = cur.fetchone()
-            total_invoiced, total_paid = invoice_row or (0, 0)
+            total_invoiced = invoice_row["total_invoiced"] if invoice_row else 0
+            total_paid = invoice_row["total_paid"] if invoice_row else 0
             balance = total_invoiced - total_paid
 
             # Get credits
@@ -107,7 +110,7 @@ def dashboard(
                 (customer_id,),
             )
             credits_row = cur.fetchone()
-            credits = credits_row[0] if credits_row else 0
+            credits = credits_row["coalesce"] if credits_row else 0
 
             # Get recent invoices
             cur.execute(
@@ -123,13 +126,13 @@ def dashboard(
             )
             invoices = [
                 {
-                    "id": row[0],
-                    "invoice_number": row[1],
-                    "issue_date": row[2],
-                    "due_date": row[3],
-                    "amount_cents": row[4],
-                    "status": row[5],
-                    "days_overdue": row[6],
+                    "id": row["id"],
+                    "invoice_number": row["invoice_number"],
+                    "issue_date": row["issue_date"],
+                    "due_date": row["due_date"],
+                    "amount_cents": row["total_amount_cents"],
+                    "status": row["status"],
+                    "days_overdue": row["days_overdue"],
                 }
                 for row in cur.fetchall()
             ]
@@ -147,10 +150,10 @@ def dashboard(
             )
             payments = [
                 {
-                    "id": row[0],
-                    "payment_date": row[1],
-                    "amount_cents": row[2],
-                    "memo": row[3],
+                    "id": row["id"],
+                    "payment_date": row["payment_date"],
+                    "amount_cents": row["amount_cents"],
+                    "memo": row["memo"],
                 }
                 for row in cur.fetchall()
             ]
@@ -218,13 +221,13 @@ def list_invoices(
             cur.execute(query, params)
             invoices = [
                 {
-                    "id": row[0],
-                    "invoice_number": row[1],
-                    "issue_date": row[2],
-                    "due_date": row[3],
-                    "amount_cents": row[4],
-                    "status": row[5],
-                    "days_overdue": row[6],
+                    "id": row["id"],
+                    "invoice_number": row["invoice_number"],
+                    "issue_date": row["issue_date"],
+                    "due_date": row["due_date"],
+                    "amount_cents": row["total_amount_cents"],
+                    "status": row["status"],
+                    "days_overdue": row["days_overdue"],
                 }
                 for row in cur.fetchall()
             ]
@@ -275,15 +278,16 @@ def get_invoice_detail(
                 )
 
             invoice = {
-                "id": invoice_row[0],
-                "invoice_number": invoice_row[1],
-                "issue_date": invoice_row[2],
-                "due_date": invoice_row[3],
-                "amount_cents": invoice_row[4],
-                "status": invoice_row[5],
-                "memo": invoice_row[6],
-                "customer_name": invoice_row[7],
-                "customer_email": invoice_row[8],
+                "id": invoice_row["id"],
+                "invoice_number": invoice_row["invoice_number"],
+                "issue_date": invoice_row["issue_date"],
+                "due_date": invoice_row["due_date"],
+                "amount_cents": invoice_row["total_amount_cents"],
+                "status": invoice_row["status"],
+                "memo": invoice_row["memo"],
+                "customer_name": invoice_row["name"],
+                "customer_email": invoice_row["email"],
+                "lines": [],  # filled below after fetching line items
             }
 
             # Get line items
@@ -294,13 +298,15 @@ def get_invoice_detail(
             )
             lines = [
                 {
-                    "description": row[0],
-                    "quantity": row[1],
-                    "unit_price_cents": row[2],
-                    "amount_cents": row[3],
+                    "description": row["description"],
+                    "quantity": row["quantity"],
+                    "unit_price_cents": row["unit_price_cents"],
+                    "amount_cents": row["amount_cents"],
                 }
                 for row in cur.fetchall()
             ]
+
+        invoice["lines"] = lines
 
         template = jinja_env.get_template("ar/invoice_detail.html")
         return template.render(
@@ -349,10 +355,10 @@ def list_payments(
             )
             payments = [
                 {
-                    "id": row[0],
-                    "payment_date": row[1],
-                    "amount_cents": row[2],
-                    "memo": row[3],
+                    "id": row["id"],
+                    "payment_date": row["payment_date"],
+                    "amount_cents": row["amount_cents"],
+                    "memo": row["memo"],
                 }
                 for row in cur.fetchall()
             ]
@@ -366,7 +372,7 @@ def list_payments(
                     (payment["id"],),
                 )
                 payment["allocations"] = [
-                    {"invoice_id": row[0], "invoice_number": row[1]}
+                    {"invoice_id": row["id"], "invoice_number": row["invoice_number"]}
                     for row in cur.fetchall()
                 ]
 
@@ -409,12 +415,12 @@ def payment_form(
             )
             invoices = [
                 {
-                    "id": row[0],
-                    "invoice_number": row[1],
-                    "issue_date": row[2],
-                    "due_date": row[3],
-                    "amount_cents": row[4],
-                    "status": row[5],
+                    "id": row["id"],
+                    "invoice_number": row["invoice_number"],
+                    "issue_date": row["issue_date"],
+                    "due_date": row["due_date"],
+                    "amount_cents": row["total_amount_cents"],
+                    "status": row["status"],
                 }
                 for row in cur.fetchall()
             ]
@@ -473,7 +479,8 @@ async def record_payment(
                 (customer_id,),
             )
             for row in cur.fetchall():
-                invoice_id, total_cents = row
+                invoice_id = row["id"]
+                total_cents = row["total_amount_cents"]
                 allocate_key = f"allocate_{invoice_id}"
                 if allocate_key in form_data:
                     allocate_amount = int(float(form_data[allocate_key]) * 100)
@@ -496,7 +503,7 @@ async def record_payment(
                 "VALUES (%s, %s, %s, %s) RETURNING id",
                 (customer_id, payment_date, amount_cents, memo),
             )
-            payment_id = cur.fetchone()[0]
+            payment_id = cur.fetchone()["id"]
 
             # Record allocations
             for alloc in allocations:

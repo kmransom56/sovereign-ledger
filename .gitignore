@@ -36,3 +36,4 @@ htmlcov/
 .specs/analysis/*.md
 .specs/reports/*.md
 
+.aider*

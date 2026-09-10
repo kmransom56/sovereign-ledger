@@ -70,18 +70,18 @@ def test_dashboard_renders(client, mock_db, auth_user):
 
         # Customer info
         mock_cursor.fetchone.side_effect = [
-            (1, "Test Customer", "test@example.com"),  # customer
-            (100000, 50000),  # invoice summary
-            (10000,),  # credits
+            {"id": 1, "name": "Test Customer", "email": "test@example.com"},  # customer
+            {"total_invoiced": 100000, "total_paid": 50000},  # invoice summary
+            {"coalesce": 10000},  # credits
         ]
 
         # Recent invoices + payments
         mock_cursor.fetchall.side_effect = [
             [
-                (1, 1001, date(2026, 9, 1), date(2026, 10, 1), 100000, "posted", 5),
+                {"id": 1, "invoice_number": 1001, "issue_date": date(2026, 9, 1), "due_date": date(2026, 10, 1), "total_amount_cents": 100000, "status": "posted", "days_overdue": 5},
             ],
             [
-                (1, date(2026, 9, 15), 50000, "Check #1234"),
+                {"id": 1, "payment_date": date(2026, 9, 15), "amount_cents": 50000, "memo": "Check #1234"},
             ],
         ]
 
@@ -115,8 +115,8 @@ def test_list_invoices(client, mock_db, auth_user):
     with patch.object(client.app.state, "db", mock_db):
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = [
-            (1, 1001, date(2026, 9, 1), date(2026, 10, 1), 100000, "posted", 5),
-            (2, 1002, date(2026, 8, 1), date(2026, 9, 1), 50000, "paid", -5),
+            {"id": 1, "invoice_number": 1001, "issue_date": date(2026, 9, 1), "due_date": date(2026, 10, 1), "total_amount_cents": 100000, "status": "posted", "days_overdue": 5},
+            {"id": 2, "invoice_number": 1002, "issue_date": date(2026, 8, 1), "due_date": date(2026, 9, 1), "total_amount_cents": 50000, "status": "paid", "days_overdue": -5},
         ]
         mock_db.cursor.return_value.__enter__.return_value = mock_cursor
 
@@ -135,14 +135,15 @@ def test_invoice_detail(client, mock_db, auth_user):
         mock_cursor = MagicMock()
 
         # Invoice header
-        mock_cursor.fetchone.return_value = (
-            1, 1001, date(2026, 9, 1), date(2026, 10, 1),
-            100000, "posted", "Invoice for services", "Test Customer", "test@example.com"
-        )
+        mock_cursor.fetchone.return_value = {
+            "id": 1, "invoice_number": 1001, "issue_date": date(2026, 9, 1), "due_date": date(2026, 10, 1),
+            "total_amount_cents": 100000, "status": "posted", "memo": "Invoice for services",
+            "name": "Test Customer", "email": "test@example.com",
+        }
 
         # Line items
         mock_cursor.fetchall.return_value = [
-            ("Consulting", 10, 10000, 100000),
+            {"description": "Consulting", "quantity": 10, "unit_price_cents": 10000, "amount_cents": 100000},
         ]
 
         mock_db.cursor.return_value.__enter__.return_value = mock_cursor
@@ -179,8 +180,8 @@ def test_payment_form_renders(client, mock_db, auth_user):
     with patch.object(client.app.state, "db", mock_db):
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = [
-            (1, 1001, date(2026, 9, 1), date(2026, 10, 1), 100000, "posted"),
-            (2, 1002, date(2026, 8, 1), date(2026, 9, 1), 50000, "posted"),
+            {"id": 1, "invoice_number": 1001, "issue_date": date(2026, 9, 1), "due_date": date(2026, 10, 1), "total_amount_cents": 100000, "status": "posted"},
+            {"id": 2, "invoice_number": 1002, "issue_date": date(2026, 8, 1), "due_date": date(2026, 9, 1), "total_amount_cents": 50000, "status": "posted"},
         ]
         mock_db.cursor.return_value.__enter__.return_value = mock_cursor
 
@@ -201,11 +202,11 @@ def test_payment_history(client, mock_db, auth_user):
         # Payments
         mock_cursor.fetchall.side_effect = [
             [
-                (1, date(2026, 9, 15), 100000, "Check #1234"),
+                {"id": 1, "payment_date": date(2026, 9, 15), "amount_cents": 100000, "memo": "Check #1234"},
             ],
             # Allocations for payment 1
             [
-                (1, 1001),
+                {"id": 1, "invoice_number": 1001},
             ],
         ]
 
@@ -233,22 +234,23 @@ def test_portal_workflow(client, mock_db, auth_user):
 
         # Dashboard
         mock_cursor.fetchone.side_effect = [
-            (1, "Test Customer", "test@example.com"),
-            (100000, 50000),
-            (10000,),
+            {"id": 1, "name": "Test Customer", "email": "test@example.com"},
+            {"total_invoiced": 100000, "total_paid": 50000},
+            {"coalesce": 10000},
         ]
         mock_cursor.fetchall.side_effect = [
-            [(1, 1001, date(2026, 9, 1), date(2026, 10, 1), 100000, "posted", 5)],
-            [(1, date(2026, 9, 15), 50000, None)],
+            [{"id": 1, "invoice_number": 1001, "issue_date": date(2026, 9, 1), "due_date": date(2026, 10, 1), "total_amount_cents": 100000, "status": "posted", "days_overdue": 5}],
+            [{"id": 1, "payment_date": date(2026, 9, 15), "amount_cents": 50000, "memo": None}],
         ]
 
         response = client.get("/portal/dashboard")
         assert response.status_code == 200
 
-        # Reset mock
-        mock_cursor.reset_mock()
+        # Reset mock — re-establish cursor chain (reset_mock clears __enter__ config)
+        mock_cursor = MagicMock()
+        mock_db.cursor.return_value.__enter__.return_value = mock_cursor
         mock_cursor.fetchall.return_value = [
-            (1, 1001, date(2026, 9, 1), date(2026, 10, 1), 100000, "posted", 5),
+            {"id": 1, "invoice_number": 1001, "issue_date": date(2026, 9, 1), "due_date": date(2026, 10, 1), "total_amount_cents": 100000, "status": "posted", "days_overdue": 5},
         ]
 
         # Invoices
@@ -257,12 +259,13 @@ def test_portal_workflow(client, mock_db, auth_user):
         assert "#1001" in response.text
 
         # Invoice detail
-        mock_cursor.fetchone.return_value = (
-            1, 1001, date(2026, 9, 1), date(2026, 10, 1),
-            100000, "posted", None, "Test Customer", "test@example.com"
-        )
+        mock_cursor.fetchone.return_value = {
+            "id": 1, "invoice_number": 1001, "issue_date": date(2026, 9, 1), "due_date": date(2026, 10, 1),
+            "total_amount_cents": 100000, "status": "posted", "memo": None,
+            "name": "Test Customer", "email": "test@example.com",
+        }
         mock_cursor.fetchall.return_value = [
-            ("Service", 1, 100000, 100000),
+            {"description": "Service", "quantity": 1, "unit_price_cents": 100000, "amount_cents": 100000},
         ]
 
         response = client.get("/portal/invoices/1")
